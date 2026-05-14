@@ -34,7 +34,7 @@ export async function joinChannel(client: Client): Promise<VoiceConnection | nul
 
     const channel = guild.channels.cache.get(config.voiceChannelId);
     if (!channel || (channel.type !== ChannelType.GuildVoice && channel.type !== ChannelType.GuildStageVoice)) {
-      logger.error(`Voice channel ${config.voiceChannelId} not found or wrong type`);
+      logger.error(`Voice channel ${config.voiceChannelId} not found`);
       return null;
     }
 
@@ -52,24 +52,19 @@ export async function joinChannel(client: Client): Promise<VoiceConnection | nul
       selfMute: true,
     });
 
-    // Handle ONLY true disconnects (kicked, server issue)
-    // Do NOT handle signalling transitions — those are normal DAVE key rotations
+    // Only handle ACTUAL disconnects — not DAVE key rotations
+    // The key insight: ready->signalling->connecting->ready is NORMAL (DAVE rotation)
+    // We only care about the Disconnected state (close code from Discord)
     connection.on(VoiceConnectionStatus.Disconnected, async () => {
       if (!connection) return;
-      logger.warn('Disconnected, waiting for natural reconnect...');
-      try {
-        // Give it plenty of time to reconnect naturally
-        await entersState(connection, VoiceConnectionStatus.Ready, 30_000);
-        logger.info('Reconnected after disconnect');
-      } catch {
-        logger.warn('Natural reconnect failed, destroying and rejoining...');
-        if (connection) {
-          connection.removeAllListeners();
-          connection.destroy();
-          connection = null;
-        }
-        scheduleReconnect(client, 5_000);
-      }
+      logger.warn('Voice disconnected');
+      // Don't do anything — let the anti-move handler deal with it
+      // The connection will either reconnect naturally or we'll catch it via voiceStateUpdate
+    });
+
+    // Suppress errors on the connection to prevent crashes
+    connection.on('error', (err) => {
+      logger.error(`Voice connection error: ${err.message}`);
     });
 
     await entersState(connection, VoiceConnectionStatus.Ready, 30_000);
@@ -93,16 +88,15 @@ export async function joinChannel(client: Client): Promise<VoiceConnection | nul
 }
 
 function setupAntiMove(client: Client) {
-  // Only add once
   if ((client as any)._antiMoveSetup) return;
   (client as any)._antiMoveSetup = true;
 
   client.on('voiceStateUpdate', (oldState: VoiceState, newState: VoiceState) => {
     if (newState.member?.id !== client.user?.id) return;
 
-    // Bot was moved to a different channel
+    // Bot moved to wrong channel → rejoin
     if (newState.channelId && newState.channelId !== config.voiceChannelId) {
-      logger.info(`Bot moved to ${newState.channelId}, rejoining ${config.voiceChannelId}`);
+      logger.info(`Bot moved to ${newState.channelId}, rejoining target channel`);
       if (connection) {
         connection.rejoin({
           channelId: config.voiceChannelId,
@@ -112,15 +106,15 @@ function setupAntiMove(client: Client) {
       }
     }
 
-    // Bot was fully disconnected
+    // Bot fully disconnected → rejoin
     if (oldState.channelId && !newState.channelId) {
-      logger.info('Bot kicked from voice, rejoining...');
+      logger.info('Bot disconnected from voice, scheduling rejoin');
       if (connection) {
         connection.removeAllListeners();
         connection.destroy();
         connection = null;
       }
-      scheduleReconnect(client, 2_000);
+      scheduleReconnect(client, 3_000);
     }
   });
 }
