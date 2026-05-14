@@ -52,14 +52,9 @@ export async function joinChannel(client: Client): Promise<VoiceConnection | nul
       selfMute: true,
     });
 
-    // Only handle ACTUAL disconnects — not DAVE key rotations
-    // The key insight: ready->signalling->connecting->ready is NORMAL (DAVE rotation)
-    // We only care about the Disconnected state (close code from Discord)
-    connection.on(VoiceConnectionStatus.Disconnected, async () => {
-      if (!connection) return;
-      logger.warn('Voice disconnected');
-      // Don't do anything — let the anti-move handler deal with it
-      // The connection will either reconnect naturally or we'll catch it via voiceStateUpdate
+    // Debug: log ALL state transitions
+    connection.on('stateChange', (oldState, newState) => {
+      logger.info(`[VOICE] State: ${oldState.status} -> ${newState.status}`);
     });
 
     // Suppress errors on the connection to prevent crashes
