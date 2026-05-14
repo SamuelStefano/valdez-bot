@@ -3,7 +3,6 @@ import { spawn } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 import { logger } from './logger';
-import { Readable } from 'stream';
 
 const RECORDINGS_DIR = path.join(process.cwd(), 'recordings');
 
@@ -11,10 +10,17 @@ if (!fs.existsSync(RECORDINGS_DIR)) {
   fs.mkdirSync(RECORDINGS_DIR, { recursive: true });
 }
 
+// Opus decoder: 48kHz stereo
+let OpusScript: any;
+try {
+  OpusScript = require('opusscript');
+} catch {
+  logger.warn('opusscript not available — audio export will use raw fallback');
+}
+
 /**
- * Export Opus packets to an OGG file.
- * Opus packets are already decoded by @discordjs/voice (DAVE handles decryption).
- * We pipe them through ffmpeg as raw opus frames.
+ * Decode Opus packets to raw PCM, then encode to OGG via ffmpeg.
+ * Discord sends 48kHz stereo Opus at 20ms frames (960 samples per channel).
  */
 export async function exportToOgg(
   packets: Map<string, OpusPacket[]>,
@@ -22,7 +28,6 @@ export async function exportToOgg(
 ): Promise<string> {
   const outputPath = path.join(RECORDINGS_DIR, `${filename}.ogg`);
 
-  // Merge all user packets into a single timeline
   const allPackets: OpusPacket[] = [];
   for (const [, userPackets] of packets) {
     allPackets.push(...userPackets);
@@ -35,54 +40,82 @@ export async function exportToOgg(
 
   logger.info(`Exporting ${allPackets.length} packets to ${outputPath}`);
 
-  // Create a readable stream from opus packets
-  // Discord sends 48kHz stereo opus at 20ms frames
-  // We'll use ffmpeg to decode opus and re-encode to ogg/opus
+  if (!OpusScript) {
+    return exportRawFallback(allPackets, filename);
+  }
+
+  // Decode Opus to PCM
+  const decoder = new OpusScript(48000, 2, OpusScript.Application.AUDIO);
+  const pcmChunks: Buffer[] = [];
+
+  for (const packet of allPackets) {
+    try {
+      const pcm = decoder.decode(packet.data);
+      pcmChunks.push(Buffer.from(pcm.buffer, pcm.byteOffset, pcm.byteLength));
+    } catch {
+      // Skip corrupted packets
+    }
+  }
+
+  decoder.delete();
+
+  if (pcmChunks.length === 0) {
+    throw new Error('All packets failed to decode');
+  }
+
+  const pcmBuffer = Buffer.concat(pcmChunks);
+  logger.info(`Decoded ${pcmChunks.length} packets to ${pcmBuffer.length} bytes PCM`);
+
+  // Pipe raw PCM to ffmpeg → OGG/Opus
   return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      ffmpeg.kill('SIGKILL');
+      reject(new Error('ffmpeg timed out after 30s'));
+    }, 30_000);
+
     const ffmpeg = spawn('ffmpeg', [
       '-y',
-      '-f', 'opus',        // Input is raw opus
-      '-ar', '48000',       // 48kHz sample rate
-      '-ac', '2',           // Stereo
-      '-i', 'pipe:0',       // Read from stdin
-      '-c:a', 'libopus',    // Output codec
-      '-b:a', '96k',        // Bitrate
+      '-f', 's16le',         // Raw PCM signed 16-bit little-endian
+      '-ar', '48000',         // 48kHz sample rate
+      '-ac', '2',             // Stereo
+      '-i', 'pipe:0',         // Read from stdin
+      '-c:a', 'libopus',      // Output codec: Opus
+      '-b:a', '96k',          // Bitrate
       outputPath,
     ]);
 
     let stderrLog = '';
 
-    ffmpeg.stderr.on('data', (data) => {
+    ffmpeg.stderr.on('data', (data: Buffer) => {
       stderrLog += data.toString();
     });
 
     ffmpeg.on('close', (code) => {
+      clearTimeout(timeout);
       if (code === 0 && fs.existsSync(outputPath)) {
         const size = fs.statSync(outputPath).size;
         logger.info(`Exported audio: ${outputPath} (${size} bytes)`);
         resolve(outputPath);
       } else {
         logger.error(`ffmpeg failed (code ${code}): ${stderrLog.slice(-500)}`);
-        // Fallback: save raw packets
         exportRawFallback(allPackets, filename).then(resolve).catch(reject);
       }
     });
 
     ffmpeg.on('error', (err) => {
+      clearTimeout(timeout);
       logger.error(`ffmpeg error: ${err.message}`);
       exportRawFallback(allPackets, filename).then(resolve).catch(reject);
     });
 
-    // Write all opus packets to ffmpeg stdin
-    for (const packet of allPackets) {
-      ffmpeg.stdin.write(packet.data);
-    }
+    // Write PCM data to ffmpeg stdin
+    ffmpeg.stdin.write(pcmBuffer);
     ffmpeg.stdin.end();
   });
 }
 
 /**
- * Fallback: concatenate raw opus data with OGG container manually
+ * Fallback: save raw Opus packet data concatenated
  */
 async function exportRawFallback(
   allPackets: OpusPacket[],
@@ -96,7 +129,7 @@ async function exportRawFallback(
 }
 
 /**
- * Export raw opus packets as PCM via ffmpeg, then to mp3
+ * Export to MP3 via ffmpeg (from decoded PCM)
  */
 export async function exportToMp3(
   packets: Map<string, OpusPacket[]>,
@@ -114,10 +147,34 @@ export async function exportToMp3(
     throw new Error('No audio data to export');
   }
 
+  if (!OpusScript) {
+    throw new Error('opusscript not available for MP3 export');
+  }
+
+  const decoder = new OpusScript(48000, 2, OpusScript.Application.AUDIO);
+  const pcmChunks: Buffer[] = [];
+
+  for (const packet of allPackets) {
+    try {
+      const pcm = decoder.decode(packet.data);
+      pcmChunks.push(Buffer.from(pcm.buffer, pcm.byteOffset, pcm.byteLength));
+    } catch {
+      // Skip corrupted packets
+    }
+  }
+
+  decoder.delete();
+  const pcmBuffer = Buffer.concat(pcmChunks);
+
   return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      ffmpeg.kill('SIGKILL');
+      reject(new Error('ffmpeg timed out after 30s'));
+    }, 30_000);
+
     const ffmpeg = spawn('ffmpeg', [
       '-y',
-      '-f', 'opus',
+      '-f', 's16le',
       '-ar', '48000',
       '-ac', '2',
       '-i', 'pipe:0',
@@ -127,18 +184,17 @@ export async function exportToMp3(
     ]);
 
     ffmpeg.on('close', (code) => {
-      if (code === 0) {
-        resolve(outputPath);
-      } else {
-        reject(new Error(`ffmpeg exited with code ${code}`));
-      }
+      clearTimeout(timeout);
+      if (code === 0) resolve(outputPath);
+      else reject(new Error(`ffmpeg exited with code ${code}`));
     });
 
-    ffmpeg.on('error', reject);
+    ffmpeg.on('error', (err) => {
+      clearTimeout(timeout);
+      reject(err);
+    });
 
-    for (const packet of allPackets) {
-      ffmpeg.stdin.write(packet.data);
-    }
+    ffmpeg.stdin.write(pcmBuffer);
     ffmpeg.stdin.end();
   });
 }
