@@ -3,7 +3,6 @@ import { config } from './config';
 import { logger } from './utils/logger';
 import { joinChannel } from './modules/voiceManager';
 import { setupVoiceTracker } from './modules/voiceTracker';
-import { startBuffering } from './modules/replayBuffer';
 
 import * as ping from './commands/ping';
 import * as horas from './commands/horas';
@@ -61,11 +60,7 @@ client.once('ready', async () => {
   }
 
   setupVoiceTracker(client);
-
-  const connection = await joinChannel(client);
-  if (connection) {
-    startBuffering(connection);
-  }
+  joinChannel(client);
 });
 
 client.on('interactionCreate', async (interaction) => {
