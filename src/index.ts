@@ -1,9 +1,13 @@
 import { Client, GatewayIntentBits, ChatInputCommandInteraction, REST, Routes } from 'discord.js';
+import { generateDependencyReport } from '@discordjs/voice';
 import { config } from './config';
 import { logger } from './utils/logger';
 import { joinChannel } from './modules/voiceManager';
 import { setupVoiceTracker } from './modules/voiceTracker';
 import { startBuffering } from './modules/replayBuffer';
+
+// Log voice dependency report on startup
+logger.info('Voice dependency report:\n' + generateDependencyReport());
 
 // Commands
 import * as ping from './commands/ping';
