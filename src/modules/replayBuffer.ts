@@ -1,4 +1,4 @@
-import { VoiceConnection, EndBehaviorType } from '@discordjs/voice';
+import { VoiceConnection, EndBehaviorType, VoiceConnectionStatus } from '@discordjs/voice';
 import { config } from '../config';
 import { logger } from '../utils/logger';
 
@@ -12,20 +12,26 @@ interface UserBuffer {
   isSubscribed: boolean;
 }
 
-// Per-user circular buffers storing raw Opus packets
 const userBuffers = new Map<string, UserBuffer>();
 
-// Active recording sessions: userId -> { startedAt, extraPackets }
 const activeRecordings = new Map<string, {
   triggeredBy: string;
   startedAt: number;
   extraPackets: Map<string, OpusPacket[]>;
 }>();
 
+let isBuffering = false;
+
 export function startBuffering(connection: VoiceConnection) {
+  if (isBuffering) return;
+  isBuffering = true;
+
   const receiver = connection.receiver;
 
+  // Log when anyone starts speaking
   receiver.speaking.on('start', (userId: string) => {
+    logger.info(`[BUFFER] User ${userId} started speaking`);
+
     if (userBuffers.get(userId)?.isSubscribed) return;
 
     const opusStream = receiver.subscribe(userId, {
@@ -34,14 +40,19 @@ export function startBuffering(connection: VoiceConnection) {
 
     const buf = getUserBuffer(userId);
     buf.isSubscribed = true;
+    let packetCount = 0;
 
     opusStream.on('data', (chunk: Buffer) => {
+      packetCount++;
+      if (packetCount === 1) {
+        logger.info(`[BUFFER] First packet from ${userId}, size: ${chunk.length} bytes`);
+      }
+
       const packet: OpusPacket = {
         data: Buffer.from(chunk),
         timestamp: Date.now(),
       };
 
-      // Add to circular buffer
       buf.packets.push(packet);
 
       // Trim buffer to keep only last N seconds
@@ -50,7 +61,7 @@ export function startBuffering(connection: VoiceConnection) {
         buf.packets.shift();
       }
 
-      // If there's an active recording, also store in extra packets
+      // Active recordings
       for (const [, recording] of activeRecordings) {
         if (!recording.extraPackets.has(userId)) {
           recording.extraPackets.set(userId, []);
@@ -60,16 +71,29 @@ export function startBuffering(connection: VoiceConnection) {
     });
 
     opusStream.on('error', (err) => {
-      logger.error(`Opus stream error for user ${userId}:`, err);
+      logger.error(`[BUFFER] Stream error for ${userId}:`, err);
       buf.isSubscribed = false;
     });
 
     opusStream.on('close', () => {
+      logger.info(`[BUFFER] Stream closed for ${userId}`);
       buf.isSubscribed = false;
     });
   });
 
-  logger.info('Replay buffer active — buffering last 2 minutes');
+  // Re-attach buffer on reconnect
+  connection.on('stateChange', (_oldState, newState) => {
+    if (newState.status === VoiceConnectionStatus.Ready) {
+      logger.info('[BUFFER] Connection ready, buffer active');
+    }
+  });
+
+  logger.info(`[BUFFER] Replay buffer started — buffering last ${config.replayBufferSeconds}s`);
+}
+
+export function resetBuffering() {
+  isBuffering = false;
+  userBuffers.clear();
 }
 
 function getUserBuffer(userId: string): UserBuffer {
@@ -79,10 +103,6 @@ function getUserBuffer(userId: string): UserBuffer {
   return userBuffers.get(userId)!;
 }
 
-/**
- * Get the buffered Opus packets for all users (last N seconds).
- * Returns a map of userId -> OpusPacket[]
- */
 export function getBufferSnapshot(): Map<string, OpusPacket[]> {
   const snapshot = new Map<string, OpusPacket[]>();
   for (const [userId, buf] of userBuffers) {
@@ -90,12 +110,10 @@ export function getBufferSnapshot(): Map<string, OpusPacket[]> {
       snapshot.set(userId, [...buf.packets]);
     }
   }
+  logger.info(`[BUFFER] Snapshot: ${snapshot.size} users, ${Array.from(snapshot.values()).reduce((sum, p) => sum + p.length, 0)} packets`);
   return snapshot;
 }
 
-/**
- * Start a recording session. Captures the current buffer + continues recording.
- */
 export function startRecording(triggeredBy: string): string {
   const sessionId = `rec_${Date.now()}`;
   activeRecordings.set(sessionId, {
@@ -107,19 +125,14 @@ export function startRecording(triggeredBy: string): string {
   return sessionId;
 }
 
-/**
- * Stop a recording session. Returns buffer snapshot + recorded packets.
- */
 export function stopRecording(sessionId: string): Map<string, OpusPacket[]> | null {
   const recording = activeRecordings.get(sessionId);
   if (!recording) return null;
 
   activeRecordings.delete(sessionId);
 
-  // Merge: buffer snapshot from when recording started + extra packets
   const merged = new Map<string, OpusPacket[]>();
 
-  // Get buffer packets that were before recording started
   for (const [userId, buf] of userBuffers) {
     const bufferPackets = buf.packets.filter(p => p.timestamp <= recording.startedAt);
     if (bufferPackets.length > 0) {
@@ -127,13 +140,12 @@ export function stopRecording(sessionId: string): Map<string, OpusPacket[]> | nu
     }
   }
 
-  // Add extra packets recorded after start
   for (const [userId, packets] of recording.extraPackets) {
     const existing = merged.get(userId) || [];
     merged.set(userId, [...existing, ...packets]);
   }
 
-  logger.info(`Recording stopped (session: ${sessionId})`);
+  logger.info(`Recording stopped (session: ${sessionId}), ${merged.size} users captured`);
   return merged;
 }
 
