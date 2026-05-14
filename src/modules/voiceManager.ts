@@ -11,74 +11,80 @@ import { logger } from '../utils/logger';
 
 let connection: VoiceConnection | null = null;
 let reconnectTimeout: NodeJS.Timeout | null = null;
+let isReconnecting = false;
 
 export function getConnection(): VoiceConnection | null {
   return connection;
 }
 
 export async function joinChannel(client: Client): Promise<VoiceConnection | null> {
-  const guild = client.guilds.cache.get(config.guildId);
-  if (!guild) {
-    logger.error(`Guild ${config.guildId} not found`);
-    return null;
-  }
-
-  const channel = guild.channels.cache.get(config.voiceChannelId);
-  if (!channel || !(channel instanceof VoiceChannel)) {
-    logger.error(`Voice channel ${config.voiceChannelId} not found`);
-    return null;
-  }
-
-  // Destroy existing connection if any
-  const existing = getVoiceConnection(config.guildId);
-  if (existing) existing.destroy();
-
-  connection = joinVoiceChannel({
-    channelId: channel.id,
-    guildId: guild.id,
-    adapterCreator: guild.voiceAdapterCreator,
-    selfDeaf: false, // Must be false to receive audio
-    selfMute: true,
-  });
-
-  setupReconnect(client);
+  if (isReconnecting) return null;
+  isReconnecting = true;
 
   try {
+    const guild = client.guilds.cache.get(config.guildId);
+    if (!guild) {
+      logger.error(`Guild ${config.guildId} not found`);
+      return null;
+    }
+
+    const channel = guild.channels.cache.get(config.voiceChannelId);
+    if (!channel || !(channel instanceof VoiceChannel)) {
+      logger.error(`Voice channel ${config.voiceChannelId} not found`);
+      return null;
+    }
+
+    // Destroy existing connection if any
+    const existing = getVoiceConnection(config.guildId);
+    if (existing) {
+      existing.removeAllListeners();
+      existing.destroy();
+    }
+
+    connection = joinVoiceChannel({
+      channelId: channel.id,
+      guildId: guild.id,
+      adapterCreator: guild.voiceAdapterCreator,
+      selfDeaf: false,
+      selfMute: true,
+    });
+
+    // Setup disconnect handler (only once per connection)
+    connection.on(VoiceConnectionStatus.Disconnected, async () => {
+      if (!connection) return;
+      logger.warn('Disconnected, waiting for auto-reconnect...');
+      try {
+        await Promise.race([
+          entersState(connection, VoiceConnectionStatus.Signalling, 5_000),
+          entersState(connection, VoiceConnectionStatus.Connecting, 5_000),
+        ]);
+        logger.info('Auto-reconnecting...');
+      } catch {
+        logger.warn('Auto-reconnect failed, rejoining in 10s...');
+        if (connection) {
+          connection.removeAllListeners();
+          connection.destroy();
+          connection = null;
+        }
+        scheduleReconnect(client);
+      }
+    });
+
     await entersState(connection, VoiceConnectionStatus.Ready, 30_000);
     logger.info(`Joined voice channel: ${channel.name}`);
     return connection;
   } catch (err) {
     logger.error('Failed to join voice channel', err);
-    connection.destroy();
-    connection = null;
+    if (connection) {
+      connection.removeAllListeners();
+      connection.destroy();
+      connection = null;
+    }
     scheduleReconnect(client);
     return null;
+  } finally {
+    isReconnecting = false;
   }
-}
-
-function setupReconnect(client: Client) {
-  if (!connection) return;
-
-  connection.on(VoiceConnectionStatus.Disconnected, async () => {
-    logger.warn('Voice connection disconnected, attempting reconnect...');
-    try {
-      await Promise.race([
-        entersState(connection!, VoiceConnectionStatus.Signalling, 5_000),
-        entersState(connection!, VoiceConnectionStatus.Connecting, 5_000),
-      ]);
-      logger.info('Reconnecting automatically...');
-    } catch {
-      logger.warn('Could not reconnect automatically, rejoining...');
-      connection?.destroy();
-      connection = null;
-      scheduleReconnect(client);
-    }
-  });
-
-  connection.on(VoiceConnectionStatus.Destroyed, () => {
-    logger.warn('Voice connection destroyed');
-    connection = null;
-  });
 }
 
 function scheduleReconnect(client: Client) {
@@ -86,7 +92,7 @@ function scheduleReconnect(client: Client) {
   reconnectTimeout = setTimeout(() => {
     logger.info('Attempting scheduled reconnect...');
     joinChannel(client);
-  }, 5_000);
+  }, 10_000); // 10s delay to avoid rapid loop
 }
 
 export function unmute() {

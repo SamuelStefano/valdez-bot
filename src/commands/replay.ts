@@ -1,6 +1,7 @@
-import { ChatInputCommandInteraction, SlashCommandBuilder, AttachmentBuilder } from 'discord.js';
+import { ChatInputCommandInteraction, SlashCommandBuilder, AttachmentBuilder, TextChannel } from 'discord.js';
 import { getBufferSnapshot, startRecording, stopRecording, getActiveRecordings } from '../modules/replayBuffer';
 import { exportToOgg } from '../utils/audioExporter';
+import { config } from '../config';
 import fs from 'fs';
 
 export const data = new SlashCommandBuilder()
@@ -16,11 +17,17 @@ export const data = new SlashCommandBuilder()
     sub.setName('clip').setDescription('Salva apenas os últimos 2 minutos como clip')
   );
 
+async function getClipsChannel(interaction: ChatInputCommandInteraction): Promise<TextChannel | null> {
+  if (!config.logChannelId) return null;
+  const channel = interaction.client.channels.cache.get(config.logChannelId);
+  if (channel && channel.isTextBased()) return channel as TextChannel;
+  return null;
+}
+
 export async function execute(interaction: ChatInputCommandInteraction) {
   const sub = interaction.options.getSubcommand();
 
   if (sub === 'start') {
-    // Check if already recording
     const active = getActiveRecordings();
     if (active.size > 0) {
       await interaction.reply({ content: '⚠️ Já tem uma gravação em andamento. Use `/replay stop` para parar.', ephemeral: true });
@@ -52,8 +59,19 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       const filename = `replay_${Date.now()}`;
       const filePath = await exportToOgg(packets, filename);
       const attachment = new AttachmentBuilder(filePath, { name: `${filename}.ogg` });
-      await interaction.editReply({ content: '✅ **Gravação salva!**', files: [attachment] });
-      // Clean up file after sending
+
+      // Send to clips channel
+      const clipsChannel = await getClipsChannel(interaction);
+      if (clipsChannel) {
+        await clipsChannel.send({
+          content: `🔴 **Replay** por **${interaction.user.displayName}**`,
+          files: [attachment],
+        });
+        await interaction.editReply(`✅ **Gravação enviada para <#${config.logChannelId}>!**`);
+      } else {
+        await interaction.editReply({ content: '✅ **Gravação salva!**', files: [attachment] });
+      }
+
       setTimeout(() => { try { fs.unlinkSync(filePath); } catch {} }, 30_000);
     } catch (err: any) {
       await interaction.editReply(`❌ Erro ao exportar áudio: ${err.message}`);
@@ -73,7 +91,19 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       const filename = `clip_${Date.now()}`;
       const filePath = await exportToOgg(snapshot, filename);
       const attachment = new AttachmentBuilder(filePath, { name: `${filename}.ogg` });
-      await interaction.editReply({ content: '🎬 **Clip dos últimos 2 minutos!**', files: [attachment] });
+
+      // Send to clips channel
+      const clipsChannel = await getClipsChannel(interaction);
+      if (clipsChannel) {
+        await clipsChannel.send({
+          content: `🎬 **Clip** por **${interaction.user.displayName}**`,
+          files: [attachment],
+        });
+        await interaction.editReply(`🎬 **Clip enviado para <#${config.logChannelId}>!**`);
+      } else {
+        await interaction.editReply({ content: '🎬 **Clip dos últimos 2 minutos!**', files: [attachment] });
+      }
+
       setTimeout(() => { try { fs.unlinkSync(filePath); } catch {} }, 30_000);
     } catch (err: any) {
       await interaction.editReply(`❌ Erro ao exportar clip: ${err.message}`);
