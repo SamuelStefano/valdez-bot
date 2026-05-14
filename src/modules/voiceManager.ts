@@ -48,24 +48,27 @@ export async function joinChannel(client: Client): Promise<void> {
     selfMute: true,
   });
 
-  // Log important state transitions only
+  // Log ALL state transitions for debugging
+  let lastLogTime = 0;
   connection.on('stateChange', (oldState, newState) => {
-    if (oldState.status === newState.status) return;
+    const now = Date.now();
+    // Rate-limit non-important logs to every 30s
+    const isImportant = newState.status === VoiceConnectionStatus.Ready
+      || newState.status === VoiceConnectionStatus.Disconnected
+      || newState.status === VoiceConnectionStatus.Destroyed;
+
+    if (isImportant || now - lastLogTime > 30_000) {
+      logger.info(`[VOICE] ${oldState.status} -> ${newState.status}`);
+      lastLogTime = now;
+    }
 
     if (newState.status === VoiceConnectionStatus.Ready) {
       logger.info('[VOICE] Connected (ready)');
-      // Start buffering audio when connection is ready
       startBuffering(connection!);
-    } else if (newState.status === VoiceConnectionStatus.Disconnected) {
-      logger.warn('[VOICE] Disconnected — will auto-reconnect');
-      // @discordjs/voice will try to reconnect automatically
-      // If it fails, it will eventually go to Destroyed
     } else if (newState.status === VoiceConnectionStatus.Destroyed) {
       logger.warn('[VOICE] Connection destroyed');
       connection = null;
       scheduleReconnect(client, 30_000);
-    } else if (oldState.status === VoiceConnectionStatus.Ready) {
-      logger.info(`[VOICE] Left ready -> ${newState.status} (DAVE rotation)`);
     }
   });
 
