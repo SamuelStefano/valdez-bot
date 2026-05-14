@@ -5,7 +5,6 @@ import { joinChannel } from './modules/voiceManager';
 import { setupVoiceTracker } from './modules/voiceTracker';
 import { startBuffering } from './modules/replayBuffer';
 
-// Commands
 import * as ping from './commands/ping';
 import * as horas from './commands/horas';
 import * as leaderboard from './commands/leaderboard';
@@ -38,10 +37,18 @@ const client = new Client({
   ],
 });
 
+// CRITICAL: Prevent unhandled error crashes
+client.on('error', (err) => {
+  logger.error('Client error (caught):', err.message);
+});
+
+process.on('unhandledRejection', (err: any) => {
+  logger.error('Unhandled rejection (caught):', err?.message || err);
+});
+
 client.once('ready', async () => {
   logger.info(`Valdez online como ${client.user?.tag}`);
 
-  // Register slash commands on startup
   try {
     const rest = new REST({ version: '10' }).setToken(config.token);
     await rest.put(
@@ -53,10 +60,8 @@ client.once('ready', async () => {
     logger.error('Failed to register slash commands', err);
   }
 
-  // Setup voice tracking
   setupVoiceTracker(client);
 
-  // Join voice channel and start buffering
   const connection = await joinChannel(client);
   if (connection) {
     startBuffering(connection);
@@ -71,18 +76,21 @@ client.on('interactionCreate', async (interaction) => {
 
   try {
     await command.execute(interaction);
-  } catch (err) {
-    logger.error(`Command error (${interaction.commandName}):`, err);
-    const reply = { content: '❌ Erro ao executar comando.', ephemeral: true };
-    if (interaction.replied || interaction.deferred) {
-      await interaction.followUp(reply);
-    } else {
-      await interaction.reply(reply);
+  } catch (err: any) {
+    logger.error(`Command error (${interaction.commandName}): ${err?.message}`);
+    try {
+      const msg = { content: '❌ Erro ao executar comando.' };
+      if (interaction.replied || interaction.deferred) {
+        await interaction.followUp(msg);
+      } else {
+        await interaction.reply(msg);
+      }
+    } catch {
+      // Interaction expired, nothing we can do
     }
   }
 });
 
-// Graceful shutdown
 process.on('SIGINT', () => {
   logger.info('Shutting down...');
   client.destroy();
