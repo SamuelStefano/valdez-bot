@@ -5,7 +5,7 @@ import {
   entersState,
   getVoiceConnection,
 } from '@discordjs/voice';
-import { Client, ChannelType } from 'discord.js';
+import { Client, ChannelType, Guild } from 'discord.js';
 import { config } from '../config';
 import { logger } from '../utils/logger';
 
@@ -17,6 +17,30 @@ export function getConnection(): VoiceConnection | null {
   return connection;
 }
 
+/**
+ * Wraps the guild's voice adapter creator to log VOICE_STATE_UPDATE
+ * and VOICE_SERVER_UPDATE events for debugging.
+ */
+function createDebugAdapter(guild: Guild) {
+  return (methods: any) => {
+    const adapter = guild.voiceAdapterCreator(methods);
+    const originalOnVoiceStateUpdate = methods.onVoiceStateUpdate;
+    const originalOnVoiceServerUpdate = methods.onVoiceServerUpdate;
+
+    methods.onVoiceStateUpdate = (data: any) => {
+      logger.info(`[ADAPTER] VOICE_STATE_UPDATE received: session_id=${data.session_id}, channel_id=${data.channel_id}`);
+      return originalOnVoiceStateUpdate(data);
+    };
+
+    methods.onVoiceServerUpdate = (data: any) => {
+      logger.info(`[ADAPTER] VOICE_SERVER_UPDATE received: endpoint=${data.endpoint}, token=${data.token ? 'present' : 'missing'}`);
+      return originalOnVoiceServerUpdate(data);
+    };
+
+    return adapter;
+  };
+}
+
 export async function joinChannel(client: Client): Promise<VoiceConnection | null> {
   if (isReconnecting) return null;
   isReconnecting = true;
@@ -24,38 +48,31 @@ export async function joinChannel(client: Client): Promise<VoiceConnection | nul
   try {
     const guild = client.guilds.cache.get(config.guildId);
     if (!guild) {
-      logger.error(`Guild ${config.guildId} not found. Available guilds: ${client.guilds.cache.map(g => `${g.name}(${g.id})`).join(', ')}`);
+      logger.error(`Guild ${config.guildId} not found`);
       return null;
     }
 
-    // Fetch channels if cache is empty
     if (guild.channels.cache.size === 0) {
-      logger.info('Channel cache empty, fetching...');
       await guild.channels.fetch();
     }
 
     const channel = guild.channels.cache.get(config.voiceChannelId);
     logger.info(`Channel lookup: ${config.voiceChannelId} -> ${channel ? `${channel.name} (type: ${channel.type})` : 'NOT FOUND'}`);
 
-    if (!channel) {
-      logger.error(`Voice channel ${config.voiceChannelId} not found`);
+    if (!channel || (channel.type !== ChannelType.GuildVoice && channel.type !== ChannelType.GuildStageVoice)) {
+      logger.error(`Voice channel not found or wrong type`);
       return null;
     }
 
-    // Accept both Voice and Stage channels
-    if (channel.type !== ChannelType.GuildVoice && channel.type !== ChannelType.GuildStageVoice) {
-      logger.error(`Channel ${config.voiceChannelId} is not a voice channel (type: ${channel.type})`);
-      return null;
-    }
-
-    // Check bot permissions
     const me = guild.members.me;
     if (me) {
       const perms = channel.permissionsFor(me);
-      logger.info(`Bot permissions in channel: Connect=${perms?.has('Connect')}, Speak=${perms?.has('Speak')}, ViewChannel=${perms?.has('ViewChannel')}`);
+      logger.info(`Permissions: Connect=${perms?.has('Connect')}, Speak=${perms?.has('Speak')}`);
     }
 
-    // Destroy existing connection if any
+    // Log intents
+    logger.info(`Client intents bitfield: ${client.options.intents}`);
+
     const existing = getVoiceConnection(config.guildId);
     if (existing) {
       existing.removeAllListeners();
@@ -65,17 +82,20 @@ export async function joinChannel(client: Client): Promise<VoiceConnection | nul
     connection = joinVoiceChannel({
       channelId: channel.id,
       guildId: guild.id,
-      adapterCreator: guild.voiceAdapterCreator,
+      adapterCreator: createDebugAdapter(guild),
       selfDeaf: false,
       selfMute: true,
+      debug: true,
     });
 
-    // Log every state change for debugging
     connection.on('stateChange', (oldState, newState) => {
       logger.info(`Voice state: ${oldState.status} -> ${newState.status}`);
     });
 
-    // Setup disconnect handler
+    connection.on('debug', (message) => {
+      logger.info(`[VOICE DEBUG] ${message}`);
+    });
+
     connection.on(VoiceConnectionStatus.Disconnected, async () => {
       if (!connection) return;
       logger.warn('Disconnected, waiting for auto-reconnect...');
@@ -84,7 +104,6 @@ export async function joinChannel(client: Client): Promise<VoiceConnection | nul
           entersState(connection, VoiceConnectionStatus.Signalling, 5_000),
           entersState(connection, VoiceConnectionStatus.Connecting, 5_000),
         ]);
-        logger.info('Auto-reconnecting...');
       } catch {
         logger.warn('Auto-reconnect failed, rejoining in 30s...');
         if (connection) {
@@ -118,23 +137,17 @@ function scheduleReconnect(client: Client) {
   reconnectTimeout = setTimeout(() => {
     logger.info('Attempting scheduled reconnect...');
     joinChannel(client);
-  }, 30_000); // 30s to avoid spam
+  }, 30_000);
 }
 
 export function unmute() {
   if (connection) {
-    connection.rejoin({
-      ...connection.joinConfig,
-      selfMute: false,
-    });
+    connection.rejoin({ ...connection.joinConfig, selfMute: false });
   }
 }
 
 export function mute() {
   if (connection) {
-    connection.rejoin({
-      ...connection.joinConfig,
-      selfMute: true,
-    });
+    connection.rejoin({ ...connection.joinConfig, selfMute: true });
   }
 }
