@@ -9,6 +9,18 @@ import { startBuffering } from './modules/replayBuffer';
 // Log voice dependency report on startup
 logger.info('Voice dependency report:\n' + generateDependencyReport());
 
+// Test UDP connectivity
+import dgram from 'dgram';
+const udpTest = dgram.createSocket('udp4');
+udpTest.send(Buffer.from('test'), 0, 4, 443, '162.159.128.233', (err) => {
+  if (err) {
+    logger.error('UDP TEST FAILED — Railway may block UDP outbound!', err);
+  } else {
+    logger.info('UDP TEST OK — outbound UDP works');
+  }
+  udpTest.close();
+});
+
 // Commands
 import * as ping from './commands/ping';
 import * as horas from './commands/horas';
