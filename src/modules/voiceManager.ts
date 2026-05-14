@@ -11,6 +11,7 @@ import { logger } from '../utils/logger';
 
 let connection: VoiceConnection | null = null;
 let reconnectTimeout: NodeJS.Timeout | null = null;
+let stuckCheckTimeout: NodeJS.Timeout | null = null;
 let isReconnecting = false;
 
 export function getConnection(): VoiceConnection | null {
@@ -38,10 +39,13 @@ export async function joinChannel(client: Client): Promise<VoiceConnection | nul
       return null;
     }
 
+    // Clean up any existing connection
     const existing = getVoiceConnection(config.guildId);
     if (existing) {
       existing.removeAllListeners();
       existing.destroy();
+      // Small delay to let Discord process the disconnect
+      await new Promise(r => setTimeout(r, 2000));
     }
 
     connection = joinVoiceChannel({
@@ -52,41 +56,22 @@ export async function joinChannel(client: Client): Promise<VoiceConnection | nul
       selfMute: true,
     });
 
-    // Handle Disconnected state — this is where we should reconnect
-    connection.on(VoiceConnectionStatus.Disconnected, async () => {
-      if (!connection) return;
-      logger.warn('[VOICE] Disconnected — waiting 5s for natural recovery');
-      try {
-        // Wait up to 5s for it to reconnect naturally (DAVE rotation)
-        await entersState(connection, VoiceConnectionStatus.Connecting, 5_000);
-        logger.info('[VOICE] Reconnecting naturally after disconnect');
-      } catch {
-        // Didn't reconnect — destroy and schedule fresh join
-        logger.warn('[VOICE] No recovery — destroying and scheduling rejoin');
-        if (connection) {
-          connection.removeAllListeners();
-          connection.destroy();
-          connection = null;
-        }
-        scheduleReconnect(client, 3_000);
+    // Track when connection leaves Ready state — detect stuck DAVE rotation
+    connection.on('stateChange', (oldState, newState) => {
+      // Log important transitions
+      if (newState.status === VoiceConnectionStatus.Ready) {
+        logger.info('[VOICE] Connected (ready)');
+        clearStuckCheck();
+      } else if (oldState.status === VoiceConnectionStatus.Ready) {
+        logger.info(`[VOICE] Left ready -> ${newState.status}`);
+        // Start a timer: if we don't get back to ready in 15s, force rejoin
+        startStuckCheck(client);
       }
     });
 
     // Suppress errors on the connection to prevent crashes
     connection.on('error', (err) => {
       logger.error(`Voice connection error: ${err.message}`);
-    });
-
-    // Log state changes (reduced to only important ones)
-    connection.on('stateChange', (oldState, newState) => {
-      if (oldState.status !== newState.status) {
-        const important = newState.status === VoiceConnectionStatus.Ready
-          || newState.status === VoiceConnectionStatus.Disconnected
-          || oldState.status === VoiceConnectionStatus.Ready;
-        if (important) {
-          logger.info(`[VOICE] ${oldState.status} -> ${newState.status}`);
-        }
-      }
     });
 
     await entersState(connection, VoiceConnectionStatus.Ready, 60_000);
@@ -106,6 +91,27 @@ export async function joinChannel(client: Client): Promise<VoiceConnection | nul
     return null;
   } finally {
     isReconnecting = false;
+  }
+}
+
+function startStuckCheck(client: Client) {
+  clearStuckCheck();
+  stuckCheckTimeout = setTimeout(() => {
+    if (!connection) return;
+    if (connection.state.status !== VoiceConnectionStatus.Ready) {
+      logger.warn(`[VOICE] Stuck in ${connection.state.status} for 15s — forcing rejoin`);
+      connection.removeAllListeners();
+      connection.destroy();
+      connection = null;
+      scheduleReconnect(client, 3_000);
+    }
+  }, 15_000);
+}
+
+function clearStuckCheck() {
+  if (stuckCheckTimeout) {
+    clearTimeout(stuckCheckTimeout);
+    stuckCheckTimeout = null;
   }
 }
 
@@ -129,16 +135,10 @@ function setupAntiMove(client: Client) {
     }
 
     // Bot fully disconnected (kicked/moved out)
-    // IMPORTANT: Do NOT destroy connection here — let the Disconnected handler deal with it
-    // During DAVE key rotation, voiceStateUpdate may briefly show no channel
     if (oldState.channelId && !newState.channelId) {
-      logger.info('[VOICE] voiceStateUpdate: bot left channel');
-      // Only act if the connection is already destroyed or null
+      logger.info('[VOICE] Bot left channel (voiceStateUpdate)');
       if (!connection || connection.state.status === VoiceConnectionStatus.Destroyed) {
-        logger.info('[VOICE] Connection already gone, scheduling rejoin');
-        scheduleReconnect(client, 3_000);
-      } else {
-        logger.info(`[VOICE] Connection still alive (${connection.state.status}), letting it handle reconnect`);
+        scheduleReconnect(client, 5_000);
       }
     }
   });
