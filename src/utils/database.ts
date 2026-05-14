@@ -1,9 +1,9 @@
-import Database from 'better-sqlite3';
+import Database, { Database as DatabaseType, Statement } from 'better-sqlite3';
 import path from 'path';
 
 const DB_PATH = path.join(process.cwd(), 'valdez.db');
 
-const db = new Database(DB_PATH);
+const db: DatabaseType = new Database(DB_PATH);
 
 db.pragma('journal_mode = WAL');
 
@@ -23,7 +23,7 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_voice_sessions_guild ON voice_sessions(guild_id);
 `);
 
-export const dbStatements = {
+export const dbStatements: Record<string, Statement> = {
   startSession: db.prepare(`
     INSERT INTO voice_sessions (user_id, username, guild_id, channel_id, joined_at)
     VALUES (?, ?, ?, ?, ?)

@@ -86,7 +86,7 @@ export async function addTrack(guildId: string, query: string, requestedBy: stri
       };
     } else if (urlType === 'sp_track') {
       // Spotify track — search on YouTube
-      const sp = await play.spotify(query);
+      const sp = await play.spotify(query) as any;
       if (sp.type === 'track') {
         const searched = await play.search(`${sp.name} ${sp.artists?.[0]?.name || ''}`, { limit: 1 });
         if (searched[0]) {
