@@ -12,7 +12,6 @@ import { logger } from '../utils/logger';
 let connection: VoiceConnection | null = null;
 let reconnectTimeout: NodeJS.Timeout | null = null;
 let isReconnecting = false;
-let clientRef: Client | null = null;
 
 export function getConnection(): VoiceConnection | null {
   return connection;
@@ -21,7 +20,6 @@ export function getConnection(): VoiceConnection | null {
 export async function joinChannel(client: Client): Promise<VoiceConnection | null> {
   if (isReconnecting) return null;
   isReconnecting = true;
-  clientRef = client;
 
   try {
     const guild = client.guilds.cache.get(config.guildId);
@@ -54,31 +52,29 @@ export async function joinChannel(client: Client): Promise<VoiceConnection | nul
       selfMute: true,
     });
 
+    // Handle ONLY true disconnects (kicked, server issue)
+    // Do NOT handle signalling transitions — those are normal DAVE key rotations
     connection.on(VoiceConnectionStatus.Disconnected, async () => {
       if (!connection) return;
-      logger.warn('Disconnected, attempting reconnect...');
+      logger.warn('Disconnected, waiting for natural reconnect...');
       try {
-        await Promise.race([
-          entersState(connection, VoiceConnectionStatus.Signalling, 5_000),
-          entersState(connection, VoiceConnectionStatus.Connecting, 5_000),
-        ]);
+        // Give it plenty of time to reconnect naturally
         await entersState(connection, VoiceConnectionStatus.Ready, 30_000);
-        logger.info('Reconnected successfully');
+        logger.info('Reconnected after disconnect');
       } catch {
-        logger.warn('Reconnect failed, rejoining...');
+        logger.warn('Natural reconnect failed, destroying and rejoining...');
         if (connection) {
           connection.removeAllListeners();
           connection.destroy();
           connection = null;
         }
-        scheduleReconnect(client);
+        scheduleReconnect(client, 5_000);
       }
     });
 
     await entersState(connection, VoiceConnectionStatus.Ready, 30_000);
     logger.info(`Joined voice channel: ${channel.name}`);
 
-    // Setup anti-AFK: if bot gets moved to another channel, rejoin original
     setupAntiMove(client);
 
     return connection;
@@ -96,22 +92,17 @@ export async function joinChannel(client: Client): Promise<VoiceConnection | nul
   }
 }
 
-/**
- * Watches for the bot being moved to a different channel (AFK, manual move)
- * and immediately rejoins the configured channel.
- */
 function setupAntiMove(client: Client) {
-  // Remove previous listener if any
-  client.removeAllListeners('voiceStateUpdate_antiMove');
+  // Only add once
+  if ((client as any)._antiMoveSetup) return;
+  (client as any)._antiMoveSetup = true;
 
-  const handler = (oldState: VoiceState, newState: VoiceState) => {
-    // Only care about the bot itself
+  client.on('voiceStateUpdate', (oldState: VoiceState, newState: VoiceState) => {
     if (newState.member?.id !== client.user?.id) return;
 
     // Bot was moved to a different channel
     if (newState.channelId && newState.channelId !== config.voiceChannelId) {
-      logger.info(`Bot was moved to ${newState.channelId}, rejoining ${config.voiceChannelId}...`);
-      // Rejoin the correct channel immediately
+      logger.info(`Bot moved to ${newState.channelId}, rejoining ${config.voiceChannelId}`);
       if (connection) {
         connection.rejoin({
           channelId: config.voiceChannelId,
@@ -121,9 +112,9 @@ function setupAntiMove(client: Client) {
       }
     }
 
-    // Bot was disconnected entirely
+    // Bot was fully disconnected
     if (oldState.channelId && !newState.channelId) {
-      logger.info('Bot was disconnected from voice, rejoining...');
+      logger.info('Bot kicked from voice, rejoining...');
       if (connection) {
         connection.removeAllListeners();
         connection.destroy();
@@ -131,9 +122,7 @@ function setupAntiMove(client: Client) {
       }
       scheduleReconnect(client, 2_000);
     }
-  };
-
-  client.on('voiceStateUpdate', handler);
+  });
 }
 
 function scheduleReconnect(client: Client, delay = 10_000) {
