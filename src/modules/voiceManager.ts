@@ -89,7 +89,7 @@ export async function joinChannel(client: Client): Promise<VoiceConnection | nul
       }
     });
 
-    await entersState(connection, VoiceConnectionStatus.Ready, 30_000);
+    await entersState(connection, VoiceConnectionStatus.Ready, 60_000);
     logger.info(`Joined voice channel: ${channel.name}`);
 
     setupAntiMove(client);
@@ -144,7 +144,7 @@ function setupAntiMove(client: Client) {
   });
 }
 
-function scheduleReconnect(client: Client, delay = 10_000) {
+function scheduleReconnect(client: Client, delay = 30_000) {
   if (reconnectTimeout) clearTimeout(reconnectTimeout);
   reconnectTimeout = setTimeout(() => {
     logger.info('Attempting scheduled reconnect...');

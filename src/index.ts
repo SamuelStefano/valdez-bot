@@ -1,14 +1,6 @@
 import { Client, GatewayIntentBits, ChatInputCommandInteraction, REST, Routes } from 'discord.js';
 import { config } from './config';
 import { logger } from './utils/logger';
-
-// Check DAVE/davey availability
-try {
-  const davey = require('@snazzah/davey');
-  logger.info(`[DAVE] davey loaded: ${Object.keys(davey).join(', ')}`);
-} catch (e: any) {
-  logger.error(`[DAVE] davey NOT available: ${e.message}`);
-}
 import { joinChannel } from './modules/voiceManager';
 import { setupVoiceTracker } from './modules/voiceTracker';
 import { startBuffering } from './modules/replayBuffer';
