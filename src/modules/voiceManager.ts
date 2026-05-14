@@ -2,6 +2,7 @@ import {
   joinVoiceChannel,
   VoiceConnection,
   VoiceConnectionStatus,
+  entersState,
   getVoiceConnection,
 } from '@discordjs/voice';
 import { Client, ChannelType, VoiceState } from 'discord.js';
@@ -22,6 +23,7 @@ export async function joinChannel(client: Client): Promise<void> {
   if (existing) {
     existing.removeAllListeners();
     existing.destroy();
+    await new Promise(r => setTimeout(r, 1000));
   }
 
   const guild = client.guilds.cache.get(config.guildId);
@@ -48,27 +50,42 @@ export async function joinChannel(client: Client): Promise<void> {
     selfMute: true,
   });
 
-  // Log ALL state transitions for debugging
-  let lastLogTime = 0;
-  connection.on('stateChange', (oldState, newState) => {
-    const now = Date.now();
-    // Rate-limit non-important logs to every 30s
-    const isImportant = newState.status === VoiceConnectionStatus.Ready
-      || newState.status === VoiceConnectionStatus.Disconnected
-      || newState.status === VoiceConnectionStatus.Destroyed;
-
-    if (isImportant || now - lastLogTime > 30_000) {
-      logger.info(`[VOICE] ${oldState.status} -> ${newState.status}`);
-      lastLogTime = now;
+  // Correct disconnect handler from discord.js docs:
+  // If it transitions to Signalling or Connecting within 5s, it's recovering.
+  // Otherwise, force rejoin.
+  connection.on(VoiceConnectionStatus.Disconnected, async () => {
+    if (!connection) return;
+    logger.warn('[VOICE] Disconnected');
+    try {
+      await Promise.race([
+        entersState(connection, VoiceConnectionStatus.Signalling, 5_000),
+        entersState(connection, VoiceConnectionStatus.Connecting, 5_000),
+      ]);
+      logger.info('[VOICE] Recovering from disconnect...');
+    } catch {
+      // Real disconnect — rejoin
+      logger.warn('[VOICE] Cannot recover — destroying and rejoining');
+      if (connection) {
+        connection.removeAllListeners();
+        connection.destroy();
+        connection = null;
+      }
+      scheduleReconnect(client, 5_000);
     }
+  });
 
-    if (newState.status === VoiceConnectionStatus.Ready) {
-      logger.info('[VOICE] Connected (ready)');
-      startBuffering(connection!);
-    } else if (newState.status === VoiceConnectionStatus.Destroyed) {
-      logger.warn('[VOICE] Connection destroyed');
+  // When ready, start buffering
+  connection.on(VoiceConnectionStatus.Ready, () => {
+    logger.info('[VOICE] Connected (ready)');
+    startBuffering(connection!);
+  });
+
+  // If destroyed externally
+  connection.on('stateChange', (oldState, newState) => {
+    if (newState.status === VoiceConnectionStatus.Destroyed && oldState.status !== VoiceConnectionStatus.Destroyed) {
+      logger.warn('[VOICE] Connection destroyed externally');
       connection = null;
-      scheduleReconnect(client, 30_000);
+      scheduleReconnect(client, 10_000);
     }
   });
 
@@ -76,9 +93,18 @@ export async function joinChannel(client: Client): Promise<void> {
     logger.error(`Voice connection error: ${err.message}`);
   });
 
-  // Don't use entersState with timeout — let the connection try forever
-  // It will eventually reach Ready or Destroyed
-  logger.info(`[VOICE] Joining ${channel.name}... (waiting for DAVE handshake)`);
+  // Wait for Ready with timeout
+  try {
+    await entersState(connection, VoiceConnectionStatus.Ready, 60_000);
+  } catch {
+    logger.error('[VOICE] Initial join timed out (60s)');
+    if (connection) {
+      connection.removeAllListeners();
+      connection.destroy();
+      connection = null;
+    }
+    scheduleReconnect(client, 30_000);
+  }
 
   setupAntiMove(client);
 }
@@ -114,8 +140,9 @@ function setupAntiMove(client: Client) {
 
 function scheduleReconnect(client: Client, delay = 30_000) {
   if (reconnectTimeout) clearTimeout(reconnectTimeout);
+  logger.info(`[VOICE] Scheduling reconnect in ${delay / 1000}s`);
   reconnectTimeout = setTimeout(() => {
-    logger.info('Attempting scheduled reconnect...');
+    logger.info('[VOICE] Attempting reconnect...');
     joinChannel(client);
   }, delay);
 }
