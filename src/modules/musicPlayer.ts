@@ -4,11 +4,12 @@ import {
   createAudioPlayer,
   createAudioResource,
   NoSubscriberBehavior,
+  StreamType,
 } from '@discordjs/voice';
-import play from 'play-dl';
 import { logger } from '../utils/logger';
 import { getConnection, unmute, mute } from './voiceManager';
 import { fetchSpotifyAlbum, fetchSpotifyPlaylist, fetchSpotifyTrack, SpotifyTrack } from '../utils/spotifyApi';
+import { ytInfo, ytPlaylist, ytSearch, ytStream } from '../utils/ytdlp';
 
 export interface Track {
   title: string;
@@ -58,6 +59,22 @@ function emit(guildId: string, event: PlayerUpdateEvent) {
   }
 }
 
+type UrlType = 'yt_video' | 'yt_playlist' | 'sp_track' | 'sp_playlist' | 'sp_album' | 'search';
+
+function detectUrlType(input: string): UrlType {
+  const u = input.trim();
+  if (/^https?:\/\/(?:www\.)?youtube\.com\/.*[?&]list=/i.test(u) || /^https?:\/\/(?:www\.)?youtube\.com\/playlist\?/i.test(u)) {
+    return 'yt_playlist';
+  }
+  if (/^https?:\/\/(?:www\.)?(?:youtube\.com\/watch\?v=|youtu\.be\/)/i.test(u)) {
+    return 'yt_video';
+  }
+  if (/spotify\.com\/(?:intl-[a-z]+\/)?track\//i.test(u)) return 'sp_track';
+  if (/spotify\.com\/(?:intl-[a-z]+\/)?playlist\//i.test(u)) return 'sp_playlist';
+  if (/spotify\.com\/(?:intl-[a-z]+\/)?album\//i.test(u)) return 'sp_album';
+  return 'search';
+}
+
 function getOrCreateQueue(guildId: string): GuildQueue {
   if (!queues.has(guildId)) {
     const player = createAudioPlayer({
@@ -103,14 +120,15 @@ function getOrCreateQueue(guildId: string): GuildQueue {
   return queues.get(guildId)!;
 }
 
-async function buildTrackFromYouTube(url: string, requestedBy: string): Promise<Track | null> {
-  const info = await play.video_info(url);
+async function buildTrackFromYouTubeUrl(url: string, requestedBy: string): Promise<Track | null> {
+  const info = await ytInfo(url);
+  if (!info) return null;
   return {
-    title: info.video_details.title || 'Unknown',
-    url: info.video_details.url,
-    duration: formatSeconds(info.video_details.durationInSec),
+    title: info.title || 'Unknown',
+    url: info.url,
+    duration: formatSeconds(info.durationSec),
     requestedBy,
-    thumbnail: info.video_details.thumbnails[0]?.url,
+    thumbnail: info.thumbnail,
   };
 }
 
@@ -121,14 +139,14 @@ async function buildTrackFromSpotifySearch(
   thumbnail?: string,
 ): Promise<Track | null> {
   const q = `${name} ${artist}`.trim();
-  const results = await play.search(q, { limit: 1, source: { youtube: 'video' } });
+  const results = await ytSearch(q, 1);
   if (!results[0]) return null;
   return {
-    title: name || results[0].title || 'Unknown',
+    title: name || results[0].title,
     url: results[0].url,
-    duration: formatSeconds(results[0].durationInSec),
+    duration: formatSeconds(results[0].durationSec),
     requestedBy,
-    thumbnail: thumbnail || results[0].thumbnails[0]?.url,
+    thumbnail: thumbnail || results[0].thumbnail,
   };
 }
 
@@ -140,51 +158,41 @@ export async function addTracks(
   const queue = getOrCreateQueue(guildId);
 
   try {
-    const urlType = await play.validate(query);
+    const urlType = detectUrlType(query);
 
-    // YouTube single video
     if (urlType === 'yt_video') {
-      const track = await buildTrackFromYouTube(query, requestedBy);
+      const track = await buildTrackFromYouTubeUrl(query, requestedBy);
       if (!track) return null;
       queue.tracks.push(track);
       if (!queue.current) playNext(guildId);
       return { tracks: [track], source: 'youtube' };
     }
 
-    // YouTube playlist
     if (urlType === 'yt_playlist') {
-      const pl = await play.playlist_info(query, { incomplete: true });
-      const videos = await pl.all_videos();
-      const tracks: Track[] = videos.map((v) => ({
-        title: v.title || 'Unknown',
+      const pl = await ytPlaylist(query);
+      const tracks: Track[] = pl.videos.map((v) => ({
+        title: v.title,
         url: v.url,
-        duration: formatSeconds(v.durationInSec),
+        duration: formatSeconds(v.durationSec),
         requestedBy,
-        thumbnail: v.thumbnails[0]?.url,
+        thumbnail: v.thumbnail,
       }));
       if (tracks.length === 0) return null;
       queue.tracks.push(...tracks);
       if (!queue.current) playNext(guildId);
-      return { tracks, source: 'youtube', playlistName: pl.title || 'Playlist' };
+      return { tracks, source: 'youtube', playlistName: pl.title };
     }
 
-    // Spotify single track — chama API direta (play-dl 1.9.7 está abandonado e quebra com schema novo)
     if (urlType === 'sp_track') {
       const t = await fetchSpotifyTrack(query);
       if (!t) return null;
-      const track = await buildTrackFromSpotifySearch(
-        t.name,
-        t.artists[0] || '',
-        requestedBy,
-        t.thumbnail,
-      );
+      const track = await buildTrackFromSpotifySearch(t.name, t.artists[0] || '', requestedBy, t.thumbnail);
       if (!track) return null;
       queue.tracks.push(track);
       if (!queue.current) playNext(guildId);
       return { tracks: [track], source: 'spotify' };
     }
 
-    // Spotify playlist/album
     if (urlType === 'sp_playlist' || urlType === 'sp_album') {
       const collection =
         urlType === 'sp_playlist' ? await fetchSpotifyPlaylist(query) : await fetchSpotifyAlbum(query);
@@ -198,7 +206,6 @@ export async function addTracks(
       const resolveOne = (t: SpotifyTrack) =>
         buildTrackFromSpotifySearch(t.name, t.artists[0] || '', requestedBy, t.thumbnail);
 
-      // Primeira música: resolve sync pra começar a tocar
       const firstTrack = await resolveOne(collection.tracks[0]);
       const resolved: Track[] = [];
       if (firstTrack) {
@@ -207,7 +214,6 @@ export async function addTracks(
         if (!queue.current) playNext(guildId);
       }
 
-      // Resto: resolve em background
       (async () => {
         for (let i = 1; i < collection.tracks.length; i++) {
           const t = collection.tracks[i];
@@ -229,15 +235,15 @@ export async function addTracks(
       return { tracks: resolved, source: 'spotify', playlistName: collection.name };
     }
 
-    // Free-text search → YouTube
-    const results = await play.search(query, { limit: 1 });
+    // Texto livre → busca YouTube
+    const results = await ytSearch(query, 1);
     if (!results[0]) return null;
     const track: Track = {
-      title: results[0].title || 'Unknown',
+      title: results[0].title,
       url: results[0].url,
-      duration: formatSeconds(results[0].durationInSec),
+      duration: formatSeconds(results[0].durationSec),
       requestedBy,
-      thumbnail: results[0].thumbnails[0]?.url,
+      thumbnail: results[0].thumbnail,
     };
     queue.tracks.push(track);
     if (!queue.current) playNext(guildId);
@@ -262,10 +268,8 @@ async function playNext(guildId: string) {
   queue.current = track;
 
   try {
-    const stream = await play.stream(track.url);
-    const resource = createAudioResource(stream.stream, {
-      inputType: stream.type,
-    });
+    const stream = ytStream(track.url);
+    const resource = createAudioResource(stream, { inputType: StreamType.Arbitrary });
 
     unmute();
 
@@ -297,7 +301,6 @@ export function previous(guildId: string): Track | null {
   if (!queue) return null;
   const prev = queue.history.shift();
   if (!prev) return null;
-  // Put current track back at the front so we don't lose it
   if (queue.current) queue.tracks.unshift(queue.current);
   queue.tracks.unshift(prev);
   queue.current = null;
