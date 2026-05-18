@@ -10,7 +10,6 @@ import {
   MessageFlags,
   TextChannel,
 } from 'discord.js';
-import { config } from '../config';
 import { logger } from '../utils/logger';
 import {
   getQueue,
@@ -34,6 +33,8 @@ const BTN = {
 
 // guildId → cached modal message
 const modalMessages = new Map<string, Message>();
+// guildId → channel where modal should appear (set quando o user roda /play)
+const modalChannels = new Map<string, string>();
 // guildId → debounce timer
 const updateTimers = new Map<string, NodeJS.Timeout>();
 
@@ -42,6 +43,24 @@ let client: Client | null = null;
 export function initMusicModal(c: Client) {
   client = c;
   setOnPlayerUpdate((guildId) => scheduleUpdate(guildId));
+}
+
+// Chamado pelo /play pra dizer onde o modal deve aparecer.
+// Se mudou de canal desde o último /play, apaga o modal antigo.
+export async function setMusicChannel(guildId: string, channelId: string) {
+  const previous = modalChannels.get(guildId);
+  if (previous && previous !== channelId) {
+    const oldMsg = modalMessages.get(guildId);
+    if (oldMsg) {
+      try {
+        await oldMsg.delete();
+      } catch {
+        /* já apagada ou sem permissão */
+      }
+      modalMessages.delete(guildId);
+    }
+  }
+  modalChannels.set(guildId, channelId);
 }
 
 function scheduleUpdate(guildId: string) {
@@ -56,9 +75,11 @@ function scheduleUpdate(guildId: string) {
   updateTimers.set(guildId, t);
 }
 
-async function getLogChannel(): Promise<TextChannel | null> {
-  if (!client || !config.logChannelId) return null;
-  const ch = await client.channels.fetch(config.logChannelId).catch(() => null);
+async function getModalChannel(guildId: string): Promise<TextChannel | null> {
+  if (!client) return null;
+  const channelId = modalChannels.get(guildId);
+  if (!channelId) return null;
+  const ch = await client.channels.fetch(channelId).catch(() => null);
   if (!ch || ch.type !== ChannelType.GuildText) return null;
   return ch as TextChannel;
 }
@@ -133,7 +154,7 @@ function buildButtons(guildId: string) {
 }
 
 export async function updateModal(guildId: string) {
-  const channel = await getLogChannel();
+  const channel = await getModalChannel(guildId);
   if (!channel) return;
 
   const embed = buildEmbed(guildId);
