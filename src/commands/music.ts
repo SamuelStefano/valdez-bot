@@ -1,10 +1,11 @@
 import { ChatInputCommandInteraction, SlashCommandBuilder, EmbedBuilder } from 'discord.js';
-import { skip, stop, pause, resume, toggleLoop, getQueue, nowPlaying } from '../modules/musicPlayer';
+import { skip, stop, pause, resume, toggleLoop, getQueue, nowPlaying, previous } from '../modules/musicPlayer';
 
 export const data = new SlashCommandBuilder()
   .setName('music')
   .setDescription('Controles de música')
   .addSubcommand(sub => sub.setName('skip').setDescription('Pula a música atual'))
+  .addSubcommand(sub => sub.setName('previous').setDescription('Volta para a música anterior'))
   .addSubcommand(sub => sub.setName('stop').setDescription('Para a música e limpa a fila'))
   .addSubcommand(sub => sub.setName('pause').setDescription('Pausa a música'))
   .addSubcommand(sub => sub.setName('resume').setDescription('Retoma a música'))
@@ -23,6 +24,16 @@ export async function execute(interaction: ChatInputCommandInteraction) {
         await interaction.reply(`⏭️ Pulou: **${skipped.title}**`);
       } else {
         await interaction.reply({ content: '❌ Nada tocando.', ephemeral: true });
+      }
+      break;
+    }
+
+    case 'previous': {
+      const prev = previous(guildId);
+      if (prev) {
+        await interaction.reply(`⏮️ Voltando: **${prev.title}**`);
+      } else {
+        await interaction.reply({ content: '❌ Sem histórico.', ephemeral: true });
       }
       break;
     }
