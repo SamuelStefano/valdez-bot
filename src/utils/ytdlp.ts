@@ -3,6 +3,13 @@ import { Readable } from 'stream';
 import { logger } from './logger';
 
 const YTDLP = process.env.YTDLP_PATH || 'yt-dlp';
+const COOKIES_PATH = process.env.YT_COOKIES_PATH || '';
+
+function commonArgs(): string[] {
+  const a: string[] = [];
+  if (COOKIES_PATH) a.push('--cookies', COOKIES_PATH);
+  return a;
+}
 
 export interface YtInfo {
   id: string;
@@ -53,17 +60,38 @@ function toInfo(j: any): YtInfo {
 
 export async function ytSearch(query: string, limit = 1): Promise<YtInfo[]> {
   const term = `ytsearch${limit}:${query}`;
-  const items = await runJson([term, '--dump-json', '--no-warnings', '--no-playlist', '--skip-download']);
+  const items = await runJson([
+    term,
+    '--dump-json',
+    '--no-warnings',
+    '--no-playlist',
+    '--skip-download',
+    ...commonArgs(),
+  ]);
   return items.map(toInfo);
 }
 
 export async function ytInfo(url: string): Promise<YtInfo | null> {
-  const items = await runJson([url, '--dump-json', '--no-warnings', '--no-playlist', '--skip-download']);
+  const items = await runJson([
+    url,
+    '--dump-json',
+    '--no-warnings',
+    '--no-playlist',
+    '--skip-download',
+    ...commonArgs(),
+  ]);
   return items[0] ? toInfo(items[0]) : null;
 }
 
 export async function ytPlaylist(url: string): Promise<{ title: string; videos: YtInfo[] }> {
-  const items = await runJson([url, '--dump-json', '--no-warnings', '--flat-playlist', '--skip-download']);
+  const items = await runJson([
+    url,
+    '--dump-json',
+    '--no-warnings',
+    '--flat-playlist',
+    '--skip-download',
+    ...commonArgs(),
+  ]);
   // flat-playlist não traz duration / thumbnail; isso é OK pra fila
   return {
     title: items[0]?.playlist || items[0]?.playlist_title || 'YouTube Playlist',
@@ -92,6 +120,7 @@ export function ytStream(url: string): Readable {
       '--no-warnings',
       '-o', '-',
       '--quiet',
+      ...commonArgs(),
     ],
     { stdio: ['ignore', 'pipe', 'pipe'] },
   );

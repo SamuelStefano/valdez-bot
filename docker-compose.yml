@@ -10,6 +10,7 @@ services:
     working_dir: /app
     environment:
       VALDEZ_DB_PATH: /app/data/valdez.db
+      YT_COOKIES_PATH: /app/data/youtube-cookies.txt
     healthcheck:
       test: ["CMD", "node", "-e", "process.exit(0)"]
       interval: 60s
