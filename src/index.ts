@@ -1,4 +1,5 @@
 import { Client, GatewayIntentBits, ChatInputCommandInteraction, REST, Routes } from 'discord.js';
+import play from 'play-dl';
 import { config } from './config';
 import { logger } from './utils/logger';
 import { joinChannel } from './modules/voiceManager';
@@ -45,8 +46,26 @@ process.on('unhandledRejection', (err: any) => {
   logger.error('Unhandled rejection (caught):', err?.message || err);
 });
 
+async function setupSpotify() {
+  const { clientId, clientSecret, refreshToken, market } = config.spotify;
+  if (!clientId || !clientSecret || !refreshToken) {
+    logger.warn('Spotify token não configurado — playlists/álbuns do Spotify ficarão indisponíveis (tracks individuais funcionam).');
+    return;
+  }
+  try {
+    await play.setToken({
+      spotify: { client_id: clientId, client_secret: clientSecret, refresh_token: refreshToken, market },
+    });
+    logger.info('Spotify token configurado.');
+  } catch (err: any) {
+    logger.error(`Falha ao configurar Spotify token: ${err?.message || err}`);
+  }
+}
+
 client.once('ready', async () => {
   logger.info(`Valdez online como ${client.user?.tag}`);
+
+  await setupSpotify();
 
   try {
     const rest = new REST({ version: '10' }).setToken(config.token);
