@@ -8,6 +8,7 @@ import {
 import play from 'play-dl';
 import { logger } from '../utils/logger';
 import { getConnection, unmute, mute } from './voiceManager';
+import { fetchSpotifyAlbum, fetchSpotifyPlaylist, fetchSpotifyTrack, SpotifyTrack } from '../utils/spotifyApi';
 
 export interface Track {
   title: string;
@@ -102,18 +103,6 @@ function getOrCreateQueue(guildId: string): GuildQueue {
   return queues.get(guildId)!;
 }
 
-async function ensureSpotifyToken(): Promise<boolean> {
-  try {
-    if (play.is_expired()) {
-      await play.refreshToken();
-    }
-    return true;
-  } catch (err) {
-    logger.warn(`Spotify token refresh failed: ${(err as Error).message}`);
-    return false;
-  }
-}
-
 async function buildTrackFromYouTube(url: string, requestedBy: string): Promise<Track | null> {
   const info = await play.video_info(url);
   return {
@@ -179,81 +168,65 @@ export async function addTracks(
       return { tracks, source: 'youtube', playlistName: pl.title || 'Playlist' };
     }
 
-    // Spotify (track / playlist / album)
-    if (urlType === 'sp_track' || urlType === 'sp_playlist' || urlType === 'sp_album') {
-      const ok = await ensureSpotifyToken();
-      if (!ok && urlType !== 'sp_track') {
-        logger.error('Spotify token not configured — cannot fetch playlist/album');
+    // Spotify single track — chama API direta (play-dl 1.9.7 está abandonado e quebra com schema novo)
+    if (urlType === 'sp_track') {
+      const t = await fetchSpotifyTrack(query);
+      if (!t) return null;
+      const track = await buildTrackFromSpotifySearch(
+        t.name,
+        t.artists[0] || '',
+        requestedBy,
+        t.thumbnail,
+      );
+      if (!track) return null;
+      queue.tracks.push(track);
+      if (!queue.current) playNext(guildId);
+      return { tracks: [track], source: 'spotify' };
+    }
+
+    // Spotify playlist/album
+    if (urlType === 'sp_playlist' || urlType === 'sp_album') {
+      const collection =
+        urlType === 'sp_playlist' ? await fetchSpotifyPlaylist(query) : await fetchSpotifyAlbum(query);
+
+      if (!collection) {
+        logger.error('Spotify creds não configuradas ou URL inválida — playlist/álbum indisponível');
         return null;
       }
+      if (collection.tracks.length === 0) return null;
 
-      const sp: any = await play.spotify(query);
+      const resolveOne = (t: SpotifyTrack) =>
+        buildTrackFromSpotifySearch(t.name, t.artists[0] || '', requestedBy, t.thumbnail);
 
-      if (sp.type === 'track') {
-        const track = await buildTrackFromSpotifySearch(
-          sp.name,
-          sp.artists?.[0]?.name || '',
-          requestedBy,
-          sp.thumbnail?.url,
-        );
-        if (!track) return null;
-        queue.tracks.push(track);
+      // Primeira música: resolve sync pra começar a tocar
+      const firstTrack = await resolveOne(collection.tracks[0]);
+      const resolved: Track[] = [];
+      if (firstTrack) {
+        resolved.push(firstTrack);
+        queue.tracks.push(firstTrack);
         if (!queue.current) playNext(guildId);
-        return { tracks: [track], source: 'spotify' };
       }
 
-      if (sp.type === 'playlist' || sp.type === 'album') {
-        const allTracks: any[] =
-          typeof sp.all_tracks === 'function' ? await sp.all_tracks() : sp.fetched_tracks?.get('1') || [];
-
-        if (allTracks.length === 0) return null;
-
-        // Resolve first track immediately so playback starts
-        const first = allTracks[0];
-        const firstTrack = await buildTrackFromSpotifySearch(
-          first.name,
-          first.artists?.[0]?.name || '',
-          requestedBy,
-          first.thumbnail?.url,
-        );
-
-        const resolved: Track[] = [];
-        if (firstTrack) {
-          resolved.push(firstTrack);
-          queue.tracks.push(firstTrack);
-          if (!queue.current) playNext(guildId);
-        }
-
-        // Resolve the rest in background — don't block /play response
-        (async () => {
-          for (let i = 1; i < allTracks.length; i++) {
-            const t = allTracks[i];
-            try {
-              const track = await buildTrackFromSpotifySearch(
-                t.name,
-                t.artists?.[0]?.name || '',
-                requestedBy,
-                t.thumbnail?.url,
-              );
-              if (track) {
-                queue.tracks.push(track);
-                resolved.push(track);
-              }
-            } catch (err) {
-              logger.warn(`Failed to resolve spotify track "${t.name}": ${(err as Error).message}`);
+      // Resto: resolve em background
+      (async () => {
+        for (let i = 1; i < collection.tracks.length; i++) {
+          const t = collection.tracks[i];
+          try {
+            const track = await resolveOne(t);
+            if (track) {
+              queue.tracks.push(track);
+              resolved.push(track);
             }
+          } catch (err) {
+            logger.warn(`Falha resolvendo "${t.name}": ${(err as Error).message}`);
           }
-          logger.info(`Spotify ${sp.type} fully resolved: ${resolved.length}/${allTracks.length} tracks`);
-        })();
+        }
+        logger.info(
+          `Spotify ${collection.type} "${collection.name}" resolvida: ${resolved.length}/${collection.tracks.length}`,
+        );
+      })();
 
-        return {
-          tracks: resolved,
-          source: 'spotify',
-          playlistName: sp.name || (sp.type === 'album' ? 'Album' : 'Playlist'),
-        };
-      }
-
-      return null;
+      return { tracks: resolved, source: 'spotify', playlistName: collection.name };
     }
 
     // Free-text search → YouTube
