@@ -17,8 +17,15 @@ export interface Track {
   thumbnail?: string;
 }
 
+export interface AddResult {
+  tracks: Track[];
+  source: 'youtube' | 'spotify' | 'search';
+  playlistName?: string;
+}
+
 interface GuildQueue {
   tracks: Track[];
+  history: Track[];
   current: Track | null;
   player: AudioPlayer;
   loop: boolean;
@@ -26,6 +33,7 @@ interface GuildQueue {
 }
 
 const queues = new Map<string, GuildQueue>();
+const HISTORY_MAX = 25;
 
 function getOrCreateQueue(guildId: string): GuildQueue {
   if (!queues.has(guildId)) {
@@ -37,9 +45,13 @@ function getOrCreateQueue(guildId: string): GuildQueue {
       const queue = queues.get(guildId);
       if (!queue) return;
 
-      if (queue.loop && queue.current) {
-        // Re-add current track to front
-        queue.tracks.unshift(queue.current);
+      if (queue.current) {
+        if (queue.loop) {
+          queue.tracks.unshift(queue.current);
+        } else {
+          queue.history.unshift(queue.current);
+          if (queue.history.length > HISTORY_MAX) queue.history.pop();
+        }
       }
 
       queue.current = null;
@@ -57,6 +69,7 @@ function getOrCreateQueue(guildId: string): GuildQueue {
 
     queues.set(guildId, {
       tracks: [],
+      history: [],
       current: null,
       player,
       loop: false,
@@ -66,65 +79,175 @@ function getOrCreateQueue(guildId: string): GuildQueue {
   return queues.get(guildId)!;
 }
 
-export async function addTrack(guildId: string, query: string, requestedBy: string): Promise<Track | null> {
+async function ensureSpotifyToken(): Promise<boolean> {
+  try {
+    if (play.is_expired()) {
+      await play.refreshToken();
+    }
+    return true;
+  } catch (err) {
+    logger.warn(`Spotify token refresh failed: ${(err as Error).message}`);
+    return false;
+  }
+}
+
+async function buildTrackFromYouTube(url: string, requestedBy: string): Promise<Track | null> {
+  const info = await play.video_info(url);
+  return {
+    title: info.video_details.title || 'Unknown',
+    url: info.video_details.url,
+    duration: formatSeconds(info.video_details.durationInSec),
+    requestedBy,
+    thumbnail: info.video_details.thumbnails[0]?.url,
+  };
+}
+
+async function buildTrackFromSpotifySearch(
+  name: string,
+  artist: string,
+  requestedBy: string,
+  thumbnail?: string,
+): Promise<Track | null> {
+  const q = `${name} ${artist}`.trim();
+  const results = await play.search(q, { limit: 1, source: { youtube: 'video' } });
+  if (!results[0]) return null;
+  return {
+    title: name || results[0].title || 'Unknown',
+    url: results[0].url,
+    duration: formatSeconds(results[0].durationInSec),
+    requestedBy,
+    thumbnail: thumbnail || results[0].thumbnails[0]?.url,
+  };
+}
+
+export async function addTracks(
+  guildId: string,
+  query: string,
+  requestedBy: string,
+): Promise<AddResult | null> {
   const queue = getOrCreateQueue(guildId);
 
   try {
-    let info: Track | null = null;
-
-    // Check if it's a URL
     const urlType = await play.validate(query);
 
+    // YouTube single video
     if (urlType === 'yt_video') {
-      const videoInfo = await play.video_info(query);
-      info = {
-        title: videoInfo.video_details.title || 'Unknown',
-        url: videoInfo.video_details.url,
-        duration: formatSeconds(videoInfo.video_details.durationInSec),
+      const track = await buildTrackFromYouTube(query, requestedBy);
+      if (!track) return null;
+      queue.tracks.push(track);
+      if (!queue.current) playNext(guildId);
+      return { tracks: [track], source: 'youtube' };
+    }
+
+    // YouTube playlist
+    if (urlType === 'yt_playlist') {
+      const pl = await play.playlist_info(query, { incomplete: true });
+      const videos = await pl.all_videos();
+      const tracks: Track[] = videos.map((v) => ({
+        title: v.title || 'Unknown',
+        url: v.url,
+        duration: formatSeconds(v.durationInSec),
         requestedBy,
-        thumbnail: videoInfo.video_details.thumbnails[0]?.url,
-      };
-    } else if (urlType === 'sp_track') {
-      // Spotify track — search on YouTube
-      const sp = await play.spotify(query) as any;
-      if (sp.type === 'track') {
-        const searched = await play.search(`${sp.name} ${sp.artists?.[0]?.name || ''}`, { limit: 1 });
-        if (searched[0]) {
-          info = {
-            title: sp.name,
-            url: searched[0].url,
-            duration: formatSeconds(searched[0].durationInSec),
-            requestedBy,
-            thumbnail: sp.thumbnail?.url,
-          };
-        }
+        thumbnail: v.thumbnails[0]?.url,
+      }));
+      if (tracks.length === 0) return null;
+      queue.tracks.push(...tracks);
+      if (!queue.current) playNext(guildId);
+      return { tracks, source: 'youtube', playlistName: pl.title || 'Playlist' };
+    }
+
+    // Spotify (track / playlist / album)
+    if (urlType === 'sp_track' || urlType === 'sp_playlist' || urlType === 'sp_album') {
+      const ok = await ensureSpotifyToken();
+      if (!ok && urlType !== 'sp_track') {
+        logger.error('Spotify token not configured — cannot fetch playlist/album');
+        return null;
       }
-    } else {
-      // Search YouTube
-      const results = await play.search(query, { limit: 1 });
-      if (results[0]) {
-        info = {
-          title: results[0].title || 'Unknown',
-          url: results[0].url,
-          duration: formatSeconds(results[0].durationInSec),
+
+      const sp: any = await play.spotify(query);
+
+      if (sp.type === 'track') {
+        const track = await buildTrackFromSpotifySearch(
+          sp.name,
+          sp.artists?.[0]?.name || '',
           requestedBy,
-          thumbnail: results[0].thumbnails[0]?.url,
+          sp.thumbnail?.url,
+        );
+        if (!track) return null;
+        queue.tracks.push(track);
+        if (!queue.current) playNext(guildId);
+        return { tracks: [track], source: 'spotify' };
+      }
+
+      if (sp.type === 'playlist' || sp.type === 'album') {
+        const allTracks: any[] =
+          typeof sp.all_tracks === 'function' ? await sp.all_tracks() : sp.fetched_tracks?.get('1') || [];
+
+        if (allTracks.length === 0) return null;
+
+        // Resolve first track immediately so playback starts
+        const first = allTracks[0];
+        const firstTrack = await buildTrackFromSpotifySearch(
+          first.name,
+          first.artists?.[0]?.name || '',
+          requestedBy,
+          first.thumbnail?.url,
+        );
+
+        const resolved: Track[] = [];
+        if (firstTrack) {
+          resolved.push(firstTrack);
+          queue.tracks.push(firstTrack);
+          if (!queue.current) playNext(guildId);
+        }
+
+        // Resolve the rest in background — don't block /play response
+        (async () => {
+          for (let i = 1; i < allTracks.length; i++) {
+            const t = allTracks[i];
+            try {
+              const track = await buildTrackFromSpotifySearch(
+                t.name,
+                t.artists?.[0]?.name || '',
+                requestedBy,
+                t.thumbnail?.url,
+              );
+              if (track) {
+                queue.tracks.push(track);
+                resolved.push(track);
+              }
+            } catch (err) {
+              logger.warn(`Failed to resolve spotify track "${t.name}": ${(err as Error).message}`);
+            }
+          }
+          logger.info(`Spotify ${sp.type} fully resolved: ${resolved.length}/${allTracks.length} tracks`);
+        })();
+
+        return {
+          tracks: resolved,
+          source: 'spotify',
+          playlistName: sp.name || (sp.type === 'album' ? 'Album' : 'Playlist'),
         };
       }
+
+      return null;
     }
 
-    if (!info) return null;
-
-    queue.tracks.push(info);
-
-    // If nothing is playing, start
-    if (!queue.current) {
-      playNext(guildId);
-    }
-
-    return info;
+    // Free-text search → YouTube
+    const results = await play.search(query, { limit: 1 });
+    if (!results[0]) return null;
+    const track: Track = {
+      title: results[0].title || 'Unknown',
+      url: results[0].url,
+      duration: formatSeconds(results[0].durationInSec),
+      requestedBy,
+      thumbnail: results[0].thumbnails[0]?.url,
+    };
+    queue.tracks.push(track);
+    if (!queue.current) playNext(guildId);
+    return { tracks: [track], source: 'search' };
   } catch (err) {
-    logger.error('Error adding track:', err);
+    logger.error(`Error adding track "${query}": ${(err as Error).message}`);
     return null;
   }
 }
@@ -134,7 +257,6 @@ async function playNext(guildId: string) {
 
   if (queue.tracks.length === 0) {
     queue.current = null;
-    // Mute when not playing
     mute();
     return;
   }
@@ -148,7 +270,6 @@ async function playNext(guildId: string) {
       inputType: stream.type,
     });
 
-    // Unmute to play
     unmute();
 
     const connection = getConnection();
@@ -159,7 +280,7 @@ async function playNext(guildId: string) {
     queue.player.play(resource);
     logger.info(`Now playing: ${track.title}`);
   } catch (err) {
-    logger.error(`Error playing ${track.title}:`, err);
+    logger.error(`Error playing ${track.title}: ${(err as Error).message}`);
     queue.current = null;
     playNext(guildId);
   }
@@ -173,10 +294,24 @@ export function skip(guildId: string): Track | null {
   return skipped;
 }
 
+export function previous(guildId: string): Track | null {
+  const queue = queues.get(guildId);
+  if (!queue) return null;
+  const prev = queue.history.shift();
+  if (!prev) return null;
+  // Put current track back at the front so we don't lose it
+  if (queue.current) queue.tracks.unshift(queue.current);
+  queue.tracks.unshift(prev);
+  queue.current = null;
+  queue.player.stop();
+  return prev;
+}
+
 export function stop(guildId: string) {
   const queue = queues.get(guildId);
   if (!queue) return;
   queue.tracks = [];
+  queue.history = [];
   queue.current = null;
   queue.loop = false;
   queue.player.stop();
@@ -195,23 +330,44 @@ export function resume(guildId: string): boolean {
   return queue.player.unpause();
 }
 
+export function isPaused(guildId: string): boolean {
+  const queue = queues.get(guildId);
+  if (!queue) return false;
+  return queue.player.state.status === AudioPlayerStatus.Paused;
+}
+
 export function toggleLoop(guildId: string): boolean {
   const queue = getOrCreateQueue(guildId);
   queue.loop = !queue.loop;
   return queue.loop;
 }
 
-export function getQueue(guildId: string): { current: Track | null; tracks: Track[]; loop: boolean } {
+export function getQueue(guildId: string): {
+  current: Track | null;
+  tracks: Track[];
+  history: Track[];
+  loop: boolean;
+} {
   const queue = queues.get(guildId);
-  if (!queue) return { current: null, tracks: [], loop: false };
-  return { current: queue.current, tracks: [...queue.tracks], loop: queue.loop };
+  if (!queue) return { current: null, tracks: [], history: [], loop: false };
+  return {
+    current: queue.current,
+    tracks: [...queue.tracks],
+    history: [...queue.history],
+    loop: queue.loop,
+  };
 }
 
 export function nowPlaying(guildId: string): Track | null {
   return queues.get(guildId)?.current || null;
 }
 
+export function getPlayer(guildId: string): AudioPlayer {
+  return getOrCreateQueue(guildId).player;
+}
+
 function formatSeconds(sec: number): string {
+  if (!sec || sec < 0) return '0:00';
   const m = Math.floor(sec / 60);
   const s = sec % 60;
   return `${m}:${s.toString().padStart(2, '0')}`;
