@@ -1,7 +1,10 @@
 import Database, { Database as DatabaseType, Statement } from 'better-sqlite3';
+import fs from 'fs';
 import path from 'path';
 
-const DB_PATH = path.join(process.cwd(), 'valdez.db');
+const DB_PATH = process.env.VALDEZ_DB_PATH || path.join(process.cwd(), 'valdez.db');
+
+fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
 
 const db: DatabaseType = new Database(DB_PATH);
 

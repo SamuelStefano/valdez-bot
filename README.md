@@ -64,8 +64,12 @@ npm run build
 npm start
 ```
 
-### 5. Deploy no Railway
+### 5. Deploy
 
+**Hetzner VPS (recomendado — mais RAM, sem rate limits do free tier):**
+Veja [DEPLOY_HETZNER.md](./DEPLOY_HETZNER.md) — Docker Compose com volume persistente, backups via cron e instruções de migração do Fly.io.
+
+**Railway:**
 1. Crie uma conta em [railway.app](https://railway.app)
 2. New Project → Deploy from GitHub repo
 3. Adicione as variáveis de ambiente (mesmas do .env)
