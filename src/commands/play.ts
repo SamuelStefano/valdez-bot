@@ -1,5 +1,6 @@
 import { ChatInputCommandInteraction, SlashCommandBuilder, EmbedBuilder } from 'discord.js';
 import { addTracks } from '../modules/musicPlayer';
+import { setMusicChannel } from '../modules/musicModal';
 
 export const data = new SlashCommandBuilder()
   .setName('play')
@@ -11,6 +12,10 @@ export const data = new SlashCommandBuilder()
 export async function execute(interaction: ChatInputCommandInteraction) {
   const query = interaction.options.getString('musica', true);
   const guildId = interaction.guildId!;
+
+  if (interaction.channelId) {
+    await setMusicChannel(guildId, interaction.channelId);
+  }
 
   await interaction.deferReply();
 
