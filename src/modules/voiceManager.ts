@@ -47,7 +47,7 @@ export async function joinChannel(client: Client): Promise<void> {
     guildId: config.guildId,
     adapterCreator: guild.voiceAdapterCreator,
     selfDeaf: false,
-    selfMute: true,
+    selfMute: false,
   });
 
   // Correct disconnect handler from discord.js docs:
@@ -123,7 +123,7 @@ function setupAntiMove(client: Client) {
         connection.rejoin({
           channelId: config.voiceChannelId,
           selfDeaf: false,
-          selfMute: true,
+          selfMute: false,
         });
       }
     }
@@ -147,14 +147,7 @@ function scheduleReconnect(client: Client, delay = 30_000) {
   }, delay);
 }
 
-export function unmute() {
-  if (connection) {
-    connection.rejoin({ ...connection.joinConfig, selfMute: false });
-  }
-}
-
-export function mute() {
-  if (connection) {
-    connection.rejoin({ ...connection.joinConfig, selfMute: true });
-  }
-}
+// Bot fica sempre desmutado — não precisa alternar selfMute por música.
+// Mantidos como no-op pra não quebrar callers existentes.
+export function unmute() {}
+export function mute() {}
