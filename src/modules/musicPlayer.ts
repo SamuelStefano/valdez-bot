@@ -35,6 +35,28 @@ interface GuildQueue {
 const queues = new Map<string, GuildQueue>();
 const HISTORY_MAX = 25;
 
+export type PlayerUpdateEvent =
+  | 'trackStart'
+  | 'trackEnd'
+  | 'paused'
+  | 'resumed'
+  | 'queueChanged'
+  | 'stopped';
+
+let onUpdate: ((guildId: string, event: PlayerUpdateEvent) => void) | null = null;
+
+export function setOnPlayerUpdate(cb: (guildId: string, event: PlayerUpdateEvent) => void) {
+  onUpdate = cb;
+}
+
+function emit(guildId: string, event: PlayerUpdateEvent) {
+  try {
+    onUpdate?.(guildId, event);
+  } catch (err) {
+    logger.error(`Player update callback failed: ${(err as Error).message}`);
+  }
+}
+
 function getOrCreateQueue(guildId: string): GuildQueue {
   if (!queues.has(guildId)) {
     const player = createAudioPlayer({
@@ -55,6 +77,7 @@ function getOrCreateQueue(guildId: string): GuildQueue {
       }
 
       queue.current = null;
+      emit(guildId, 'trackEnd');
       playNext(guildId);
     });
 
@@ -258,6 +281,7 @@ async function playNext(guildId: string) {
   if (queue.tracks.length === 0) {
     queue.current = null;
     mute();
+    emit(guildId, 'stopped');
     return;
   }
 
@@ -279,6 +303,7 @@ async function playNext(guildId: string) {
 
     queue.player.play(resource);
     logger.info(`Now playing: ${track.title}`);
+    emit(guildId, 'trackStart');
   } catch (err) {
     logger.error(`Error playing ${track.title}: ${(err as Error).message}`);
     queue.current = null;
@@ -316,18 +341,23 @@ export function stop(guildId: string) {
   queue.loop = false;
   queue.player.stop();
   mute();
+  emit(guildId, 'stopped');
 }
 
 export function pause(guildId: string): boolean {
   const queue = queues.get(guildId);
   if (!queue) return false;
-  return queue.player.pause();
+  const ok = queue.player.pause();
+  if (ok) emit(guildId, 'paused');
+  return ok;
 }
 
 export function resume(guildId: string): boolean {
   const queue = queues.get(guildId);
   if (!queue) return false;
-  return queue.player.unpause();
+  const ok = queue.player.unpause();
+  if (ok) emit(guildId, 'resumed');
+  return ok;
 }
 
 export function isPaused(guildId: string): boolean {
@@ -339,6 +369,7 @@ export function isPaused(guildId: string): boolean {
 export function toggleLoop(guildId: string): boolean {
   const queue = getOrCreateQueue(guildId);
   queue.loop = !queue.loop;
+  emit(guildId, 'queueChanged');
   return queue.loop;
 }
 
