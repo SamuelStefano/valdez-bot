@@ -4,6 +4,7 @@ import { config } from './config';
 import { logger } from './utils/logger';
 import { joinChannel } from './modules/voiceManager';
 import { setupVoiceTracker } from './modules/voiceTracker';
+import { initMusicModal, handleMusicButton } from './modules/musicModal';
 
 import * as ping from './commands/ping';
 import * as horas from './commands/horas';
@@ -79,10 +80,22 @@ client.once('ready', async () => {
   }
 
   setupVoiceTracker(client);
+  initMusicModal(client);
   joinChannel(client);
 });
 
 client.on('interactionCreate', async (interaction) => {
+  if (interaction.isButton()) {
+    if (interaction.customId.startsWith('music:')) {
+      try {
+        await handleMusicButton(interaction);
+      } catch (err: any) {
+        logger.error(`Music button error: ${err?.message}`);
+      }
+    }
+    return;
+  }
+
   if (!interaction.isChatInputCommand()) return;
 
   const command = commands.get(interaction.commandName);
