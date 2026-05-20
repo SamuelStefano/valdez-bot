@@ -2,6 +2,7 @@ import {
   joinVoiceChannel,
   VoiceConnection,
   VoiceConnectionStatus,
+  VoiceConnectionDisconnectReason,
   entersState,
   getVoiceConnection,
 } from '@discordjs/voice';
@@ -53,9 +54,12 @@ export async function joinChannel(client: Client): Promise<void> {
   // Correct disconnect handler from discord.js docs:
   // If it transitions to Signalling or Connecting within 5s, it's recovering.
   // Otherwise, force rejoin.
-  connection.on(VoiceConnectionStatus.Disconnected, async () => {
+  connection.on(VoiceConnectionStatus.Disconnected, async (_old, newState: any) => {
     if (!connection) return;
-    logger.warn('[VOICE] Disconnected');
+    const reason = newState?.reason;
+    const reasonName = VoiceConnectionDisconnectReason[reason] ?? reason ?? 'unknown';
+    const closeCode = newState?.closeCode;
+    logger.warn(`[VOICE] Disconnected (reason=${reasonName}${closeCode !== undefined ? ` closeCode=${closeCode}` : ''})`);
     try {
       await Promise.race([
         entersState(connection, VoiceConnectionStatus.Signalling, 5_000),

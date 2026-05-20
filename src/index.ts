@@ -1,3 +1,6 @@
+import { setDefaultResultOrder } from 'node:dns';
+setDefaultResultOrder('ipv4first');
+
 import { Client, GatewayIntentBits, ChatInputCommandInteraction, REST, Routes } from 'discord.js';
 import { config } from './config';
 import { logger } from './utils/logger';
