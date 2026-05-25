@@ -7,3 +7,5 @@ dist/
 *.db-shm
 recordings/
 data/
+
+.sdd/

@@ -8,6 +8,7 @@ import { joinChannel } from './modules/voiceManager';
 import { setupVoiceTracker } from './modules/voiceTracker';
 import { initMusicModal, handleMusicButton } from './modules/musicModal';
 import { logSpotifyStatus } from './utils/spotifyApi';
+import { startHealthServer, startHeartbeat } from './utils/health';
 
 import * as ping from './commands/ping';
 import * as horas from './commands/horas';
@@ -50,6 +51,10 @@ process.on('unhandledRejection', (err: any) => {
   logger.error('Unhandled rejection (caught):', err?.message || err);
 });
 
+process.on('uncaughtException', (err: any) => {
+  logger.error('Uncaught exception (caught):', err?.message || err);
+});
+
 client.once('ready', async () => {
   logger.info(`Valdez online como ${client.user?.tag}`);
 
@@ -68,6 +73,7 @@ client.once('ready', async () => {
 
   setupVoiceTracker(client);
   initMusicModal(client);
+  startHeartbeat(client);
   joinChannel(client);
 });
 
@@ -105,16 +111,19 @@ client.on('interactionCreate', async (interaction) => {
   }
 });
 
-process.on('SIGINT', () => {
-  logger.info('Shutting down...');
-  client.destroy();
-  process.exit(0);
-});
+// Start health server before login so /health answers 503 (not connection
+// refused) while the gateway is still connecting — avoids autoheal crashloops
+// when Discord login is slow on boot.
+const healthServer = startHealthServer(client);
 
-process.on('SIGTERM', () => {
+function shutdown() {
   logger.info('Shutting down...');
+  healthServer.close();
   client.destroy();
   process.exit(0);
-});
+}
+
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);
 
 client.login(config.token);
