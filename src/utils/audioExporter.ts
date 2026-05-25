@@ -96,11 +96,18 @@ export async function exportToOgg(
   });
 }
 
+// Discord delivers one 20ms Opus frame at a time while a user speaks, but the
+// arrival timestamp (Date.now()) jitters a few ms each frame. Placing frames by
+// raw arrival time leaves micro-gaps/overlaps between consecutive 20ms frames —
+// that is the "choppy" sound. So within a speaking run we lay frames strictly
+// back-to-back (each is exactly 20ms) and only insert silence when the gap since
+// the previous frame is large enough to be a real pause.
+const FRAME_SAMPLES = (SAMPLE_RATE * FRAME_MS) / 1000 * CHANNELS; // 1920
+const PAUSE_GAP_MS = 100; // gap above this = real silence, below = same run
+
 /**
- * Decode every user onto one shared timeline by arrival timestamp and SUM the
- * samples. Gaps stay silent (timing preserved) and simultaneous speakers are
- * mixed — instead of the old behaviour of concatenating all packets in
- * timestamp order, which made overlapping voices ping-pong and dropped silence.
+ * Mix every user onto one shared timeline: frames are contiguous inside a run,
+ * real pauses become silence, and simultaneous speakers are summed.
  */
 function mixToPcm(
   packets: Map<string, OpusPacket[]>,
@@ -114,42 +121,59 @@ function mixToPcm(
   }
 
   const capMs = (config.maxRecordingSeconds + 5) * 1000;
-  const durationMs = Math.min(maxTs - minTs + FRAME_MS, capMs);
-  const totalSamples = Math.ceil((durationMs / 1000) * SAMPLE_RATE) * CHANNELS;
+  const spanMs = Math.min(maxTs - minTs + FRAME_MS, capMs);
+  // +1s headroom: a contiguous run can extend slightly past the wall-clock span.
+  const totalSamples = Math.ceil((spanMs / 1000) * SAMPLE_RATE) * CHANNELS + SAMPLE_RATE * CHANNELS;
 
   const mix = new Int32Array(totalSamples);
-  const decoder = new OpusScript(SAMPLE_RATE, CHANNELS, OpusScript.Application.AUDIO);
   let decoded = 0;
 
   for (const userPackets of packets.values()) {
+    const decoder = new OpusScript(SAMPLE_RATE, CHANNELS, OpusScript.Application.AUDIO);
+    let prevTs: number | null = null;
+    let writeOffset = 0;
+
     for (const packet of userPackets) {
+      if (prevTs === null) {
+        writeOffset = Math.round(((packet.timestamp - minTs) / 1000) * SAMPLE_RATE) * CHANNELS;
+      } else if (packet.timestamp - prevTs > PAUSE_GAP_MS) {
+        writeOffset += Math.round(((packet.timestamp - prevTs) / 1000) * SAMPLE_RATE) * CHANNELS;
+      }
+      prevTs = packet.timestamp;
+
       let pcm: Buffer;
       try {
         pcm = decoder.decode(packet.data);
       } catch {
+        writeOffset += FRAME_SAMPLES; // keep timing aligned through a lost frame
         continue;
       }
       decoded++;
+
       const n = pcm.length >> 1;
-      let offset = Math.round(((packet.timestamp - minTs) / 1000) * SAMPLE_RATE) * CHANNELS;
-      for (let i = 0; i < n && offset < totalSamples; i++, offset++) {
-        if (offset >= 0) mix[offset] += pcm.readInt16LE(i << 1);
+      for (let i = 0; i < n && writeOffset + i < totalSamples; i++) {
+        const o = writeOffset + i;
+        if (o >= 0) mix[o] += pcm.readInt16LE(i << 1);
       }
+      writeOffset += n;
     }
+    decoder.delete();
   }
-  decoder.delete();
 
   if (decoded === 0) {
     throw new Error('All packets failed to decode');
   }
 
-  const out = Buffer.allocUnsafe(totalSamples * 2);
-  for (let i = 0; i < totalSamples; i++) {
+  let end = totalSamples;
+  while (end > 0 && mix[end - 1] === 0) end--; // trim trailing silence headroom
+
+  const out = Buffer.allocUnsafe(end * 2);
+  for (let i = 0; i < end; i++) {
     const s = mix[i] > 32767 ? 32767 : mix[i] < -32768 ? -32768 : mix[i];
     out.writeInt16LE(s, i * 2);
   }
 
-  logger.info(`Mixed ${decoded} packets from ${packets.size} users → ${(durationMs / 1000).toFixed(1)}s`);
+  logger.info(`Mixed ${decoded} packets from ${packets.size} users → ${(end / CHANNELS / SAMPLE_RATE).toFixed(1)}s`);
   return out;
 }
 
