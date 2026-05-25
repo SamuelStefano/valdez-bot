@@ -1,8 +1,13 @@
 import { OpusPacket } from '../modules/replayBuffer';
+import { config } from '../config';
 import { spawn } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 import { logger } from './logger';
+
+const SAMPLE_RATE = 48000;
+const CHANNELS = 2;
+const FRAME_MS = 20;
 
 const RECORDINGS_DIR = path.join(process.cwd(), 'recordings');
 
@@ -29,42 +34,19 @@ export async function exportToOgg(
   const outputPath = path.join(RECORDINGS_DIR, `${filename}.ogg`);
 
   const allPackets: OpusPacket[] = [];
-  for (const [, userPackets] of packets) {
-    allPackets.push(...userPackets);
-  }
-  allPackets.sort((a, b) => a.timestamp - b.timestamp);
+  for (const userPackets of packets.values()) allPackets.push(...userPackets);
 
   if (allPackets.length === 0) {
     throw new Error('No audio data to export');
   }
 
-  logger.info(`Exporting ${allPackets.length} packets to ${outputPath}`);
-
   if (!OpusScript) {
+    allPackets.sort((a, b) => a.timestamp - b.timestamp);
     return exportRawFallback(allPackets, filename);
   }
 
-  // Decode Opus to PCM
-  const decoder = new OpusScript(48000, 2, OpusScript.Application.AUDIO);
-  const pcmChunks: Buffer[] = [];
-
-  for (const packet of allPackets) {
-    try {
-      const pcm = decoder.decode(packet.data);
-      pcmChunks.push(Buffer.from(pcm.buffer, pcm.byteOffset, pcm.byteLength));
-    } catch {
-      // Skip corrupted packets
-    }
-  }
-
-  decoder.delete();
-
-  if (pcmChunks.length === 0) {
-    throw new Error('All packets failed to decode');
-  }
-
-  const pcmBuffer = Buffer.concat(pcmChunks);
-  logger.info(`Decoded ${pcmChunks.length} packets to ${pcmBuffer.length} bytes PCM`);
+  const pcmBuffer = mixToPcm(packets, allPackets);
+  logger.info(`Exporting mixed audio to ${outputPath} (${pcmBuffer.length} bytes PCM)`);
 
   // Pipe raw PCM to ffmpeg → OGG/Opus
   return new Promise((resolve, reject) => {
@@ -115,6 +97,63 @@ export async function exportToOgg(
 }
 
 /**
+ * Decode every user onto one shared timeline by arrival timestamp and SUM the
+ * samples. Gaps stay silent (timing preserved) and simultaneous speakers are
+ * mixed — instead of the old behaviour of concatenating all packets in
+ * timestamp order, which made overlapping voices ping-pong and dropped silence.
+ */
+function mixToPcm(
+  packets: Map<string, OpusPacket[]>,
+  allPackets: OpusPacket[]
+): Buffer {
+  let minTs = Infinity;
+  let maxTs = -Infinity;
+  for (const p of allPackets) {
+    if (p.timestamp < minTs) minTs = p.timestamp;
+    if (p.timestamp > maxTs) maxTs = p.timestamp;
+  }
+
+  const capMs = (config.maxRecordingSeconds + 5) * 1000;
+  const durationMs = Math.min(maxTs - minTs + FRAME_MS, capMs);
+  const totalSamples = Math.ceil((durationMs / 1000) * SAMPLE_RATE) * CHANNELS;
+
+  const mix = new Int32Array(totalSamples);
+  const decoder = new OpusScript(SAMPLE_RATE, CHANNELS, OpusScript.Application.AUDIO);
+  let decoded = 0;
+
+  for (const userPackets of packets.values()) {
+    for (const packet of userPackets) {
+      let pcm: Buffer;
+      try {
+        pcm = decoder.decode(packet.data);
+      } catch {
+        continue;
+      }
+      decoded++;
+      const n = pcm.length >> 1;
+      let offset = Math.round(((packet.timestamp - minTs) / 1000) * SAMPLE_RATE) * CHANNELS;
+      for (let i = 0; i < n && offset < totalSamples; i++, offset++) {
+        if (offset >= 0) mix[offset] += pcm.readInt16LE(i << 1);
+      }
+    }
+  }
+  decoder.delete();
+
+  if (decoded === 0) {
+    throw new Error('All packets failed to decode');
+  }
+
+  const out = Buffer.allocUnsafe(totalSamples * 2);
+  for (let i = 0; i < totalSamples; i++) {
+    const s = mix[i] > 32767 ? 32767 : mix[i] < -32768 ? -32768 : mix[i];
+    out.writeInt16LE(s, i * 2);
+  }
+
+  logger.info(`Mixed ${decoded} packets from ${packets.size} users → ${(durationMs / 1000).toFixed(1)}s`);
+  return out;
+}
+
+/**
  * Fallback: save raw Opus packet data concatenated
  */
 async function exportRawFallback(
@@ -126,75 +165,4 @@ async function exportRawFallback(
   fs.writeFileSync(outputPath, rawData);
   logger.info(`Exported raw audio fallback: ${outputPath} (${rawData.length} bytes)`);
   return outputPath;
-}
-
-/**
- * Export to MP3 via ffmpeg (from decoded PCM)
- */
-export async function exportToMp3(
-  packets: Map<string, OpusPacket[]>,
-  filename: string
-): Promise<string> {
-  const outputPath = path.join(RECORDINGS_DIR, `${filename}.mp3`);
-
-  const allPackets: OpusPacket[] = [];
-  for (const [, userPackets] of packets) {
-    allPackets.push(...userPackets);
-  }
-  allPackets.sort((a, b) => a.timestamp - b.timestamp);
-
-  if (allPackets.length === 0) {
-    throw new Error('No audio data to export');
-  }
-
-  if (!OpusScript) {
-    throw new Error('opusscript not available for MP3 export');
-  }
-
-  const decoder = new OpusScript(48000, 2, OpusScript.Application.AUDIO);
-  const pcmChunks: Buffer[] = [];
-
-  for (const packet of allPackets) {
-    try {
-      const pcm = decoder.decode(packet.data);
-      pcmChunks.push(Buffer.from(pcm.buffer, pcm.byteOffset, pcm.byteLength));
-    } catch {
-      // Skip corrupted packets
-    }
-  }
-
-  decoder.delete();
-  const pcmBuffer = Buffer.concat(pcmChunks);
-
-  return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      ffmpeg.kill('SIGKILL');
-      reject(new Error('ffmpeg timed out after 30s'));
-    }, 30_000);
-
-    const ffmpeg = spawn('ffmpeg', [
-      '-y',
-      '-f', 's16le',
-      '-ar', '48000',
-      '-ac', '2',
-      '-i', 'pipe:0',
-      '-c:a', 'libmp3lame',
-      '-b:a', '128k',
-      outputPath,
-    ]);
-
-    ffmpeg.on('close', (code) => {
-      clearTimeout(timeout);
-      if (code === 0) resolve(outputPath);
-      else reject(new Error(`ffmpeg exited with code ${code}`));
-    });
-
-    ffmpeg.on('error', (err) => {
-      clearTimeout(timeout);
-      reject(err);
-    });
-
-    ffmpeg.stdin.write(pcmBuffer);
-    ffmpeg.stdin.end();
-  });
 }
