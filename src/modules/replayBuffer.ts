@@ -1,4 +1,4 @@
-import { VoiceConnection, EndBehaviorType, VoiceConnectionStatus } from '@discordjs/voice';
+import { VoiceConnection, EndBehaviorType, VoiceReceiver } from '@discordjs/voice';
 import { config } from '../config';
 import { logger } from '../utils/logger';
 
@@ -12,24 +12,58 @@ interface UserBuffer {
   isSubscribed: boolean;
 }
 
-const userBuffers = new Map<string, UserBuffer>();
-
-const activeRecordings = new Map<string, {
+interface ActiveRecording {
   triggeredBy: string;
   startedAt: number;
   extraPackets: Map<string, OpusPacket[]>;
-}>();
+}
+
+const userBuffers = new Map<string, UserBuffer>();
+const activeRecordings = new Map<string, ActiveRecording>();
 
 let isBuffering = false;
+let trimInterval: NodeJS.Timeout | null = null;
+let activeReceiver: VoiceReceiver | null = null;
+let speakingHandler: ((userId: string) => void) | null = null;
+
+function windowMs() {
+  return config.replayBufferSeconds * 1000;
+}
+
+function trimUser(buf: UserBuffer, cutoff: number) {
+  while (buf.packets.length > 0 && buf.packets[0].timestamp < cutoff) {
+    buf.packets.shift();
+  }
+}
+
+function trimExtra(packets: OpusPacket[], cutoff: number) {
+  while (packets.length > 0 && packets[0].timestamp < cutoff) {
+    packets.shift();
+  }
+}
 
 export function startBuffering(connection: VoiceConnection) {
-  if (isBuffering) return;
+  // Idempotent: a reconnect creates a NEW receiver, so always tear down the old
+  // attachment before re-attaching — otherwise the new connection is never read.
+  if (isBuffering) resetBuffering();
   isBuffering = true;
 
+  // Evict packets that fell out of the window even while a user is silent.
+  // Without this, someone who spoke then went quiet keeps stale packets forever.
+  trimInterval = setInterval(() => {
+    const now = Date.now();
+    for (const buf of userBuffers.values()) trimUser(buf, now - windowMs());
+    const recCutoff = now - config.maxRecordingSeconds * 1000;
+    for (const rec of activeRecordings.values()) {
+      for (const packets of rec.extraPackets.values()) trimExtra(packets, recCutoff);
+    }
+  }, 5_000);
+
   const receiver = connection.receiver;
+  activeReceiver = receiver;
 
   // Log when anyone starts speaking
-  receiver.speaking.on('start', (userId: string) => {
+  speakingHandler = (userId: string) => {
     logger.info(`[BUFFER] User ${userId} started speaking`);
 
     if (userBuffers.get(userId)?.isSubscribed) return;
@@ -56,17 +90,18 @@ export function startBuffering(connection: VoiceConnection) {
       buf.packets.push(packet);
 
       // Trim buffer to keep only last N seconds
-      const cutoff = Date.now() - config.replayBufferSeconds * 1000;
-      while (buf.packets.length > 0 && buf.packets[0].timestamp < cutoff) {
-        buf.packets.shift();
-      }
+      trimUser(buf, Date.now() - windowMs());
 
-      // Active recordings
-      for (const [, recording] of activeRecordings) {
+      // Active recordings — capped at maxRecordingSeconds so a forgotten
+      // /replay start can't grow the buffer until the container OOMs.
+      const recCutoff = Date.now() - config.maxRecordingSeconds * 1000;
+      for (const recording of activeRecordings.values()) {
         if (!recording.extraPackets.has(userId)) {
           recording.extraPackets.set(userId, []);
         }
-        recording.extraPackets.get(userId)!.push(packet);
+        const extra = recording.extraPackets.get(userId)!;
+        extra.push(packet);
+        trimExtra(extra, recCutoff);
       }
     });
 
@@ -79,21 +114,26 @@ export function startBuffering(connection: VoiceConnection) {
       logger.info(`[BUFFER] Stream closed for ${userId}`);
       buf.isSubscribed = false;
     });
-  });
+  };
 
-  // Re-attach buffer on reconnect
-  connection.on('stateChange', (_oldState, newState) => {
-    if (newState.status === VoiceConnectionStatus.Ready) {
-      logger.info('[BUFFER] Connection ready, buffer active');
-    }
-  });
+  receiver.speaking.on('start', speakingHandler);
 
   logger.info(`[BUFFER] Replay buffer started — buffering last ${config.replayBufferSeconds}s`);
 }
 
 export function resetBuffering() {
   isBuffering = false;
+  if (trimInterval) {
+    clearInterval(trimInterval);
+    trimInterval = null;
+  }
+  if (activeReceiver && speakingHandler) {
+    activeReceiver.speaking.off('start', speakingHandler);
+  }
+  activeReceiver = null;
+  speakingHandler = null;
   userBuffers.clear();
+  activeRecordings.clear();
 }
 
 function getUserBuffer(userId: string): UserBuffer {
@@ -104,10 +144,12 @@ function getUserBuffer(userId: string): UserBuffer {
 }
 
 export function getBufferSnapshot(): Map<string, OpusPacket[]> {
+  const cutoff = Date.now() - windowMs();
   const snapshot = new Map<string, OpusPacket[]>();
   for (const [userId, buf] of userBuffers) {
-    if (buf.packets.length > 0) {
-      snapshot.set(userId, [...buf.packets]);
+    const recent = buf.packets.filter(p => p.timestamp >= cutoff);
+    if (recent.length > 0) {
+      snapshot.set(userId, recent);
     }
   }
   logger.info(`[BUFFER] Snapshot: ${snapshot.size} users, ${Array.from(snapshot.values()).reduce((sum, p) => sum + p.length, 0)} packets`);
@@ -133,8 +175,11 @@ export function stopRecording(sessionId: string): Map<string, OpusPacket[]> | nu
 
   const merged = new Map<string, OpusPacket[]>();
 
+  const windowStart = recording.startedAt - windowMs();
   for (const [userId, buf] of userBuffers) {
-    const bufferPackets = buf.packets.filter(p => p.timestamp <= recording.startedAt);
+    const bufferPackets = buf.packets.filter(
+      p => p.timestamp >= windowStart && p.timestamp < recording.startedAt
+    );
     if (bufferPackets.length > 0) {
       merged.set(userId, [...bufferPackets]);
     }
@@ -149,12 +194,8 @@ export function stopRecording(sessionId: string): Map<string, OpusPacket[]> | nu
   return merged;
 }
 
-export function getActiveRecordings(): Map<string, { triggeredBy: string; startedAt: number }> {
-  return activeRecordings as any;
-}
-
-export function clearBuffer() {
-  userBuffers.clear();
+export function getActiveRecordings(): Map<string, Pick<ActiveRecording, 'triggeredBy' | 'startedAt'>> {
+  return activeRecordings;
 }
 
 export { OpusPacket };

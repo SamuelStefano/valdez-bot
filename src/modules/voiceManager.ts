@@ -24,6 +24,7 @@ export async function joinChannel(client: Client): Promise<void> {
   if (existing) {
     existing.removeAllListeners();
     existing.destroy();
+    resetBuffering();
     await new Promise(r => setTimeout(r, 1000));
   }
 
@@ -74,6 +75,7 @@ export async function joinChannel(client: Client): Promise<void> {
         connection.destroy();
         connection = null;
       }
+      resetBuffering();
       scheduleReconnect(client, 5_000);
     }
   });
@@ -89,6 +91,7 @@ export async function joinChannel(client: Client): Promise<void> {
     if (newState.status === VoiceConnectionStatus.Destroyed && oldState.status !== VoiceConnectionStatus.Destroyed) {
       logger.warn('[VOICE] Connection destroyed externally');
       connection = null;
+      resetBuffering();
       scheduleReconnect(client, 10_000);
     }
   });
