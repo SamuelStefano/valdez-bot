@@ -143,8 +143,11 @@ function getUserBuffer(userId: string): UserBuffer {
   return userBuffers.get(userId)!;
 }
 
-export function getBufferSnapshot(): Map<string, OpusPacket[]> {
-  const cutoff = Date.now() - windowMs();
+export function getBufferSnapshot(durationSec?: number): Map<string, OpusPacket[]> {
+  const requested = durationSec ?? config.defaultClipSeconds;
+  // Cap at buffer capacity — can't snapshot more than we kept in memory.
+  const effective = Math.min(requested, config.replayBufferSeconds);
+  const cutoff = Date.now() - effective * 1000;
   const snapshot = new Map<string, OpusPacket[]>();
   for (const [userId, buf] of userBuffers) {
     const recent = buf.packets.filter(p => p.timestamp >= cutoff);
@@ -152,7 +155,7 @@ export function getBufferSnapshot(): Map<string, OpusPacket[]> {
       snapshot.set(userId, recent);
     }
   }
-  logger.info(`[BUFFER] Snapshot: ${snapshot.size} users, ${Array.from(snapshot.values()).reduce((sum, p) => sum + p.length, 0)} packets`);
+  logger.info(`[BUFFER] Snapshot (${effective}s): ${snapshot.size} users, ${Array.from(snapshot.values()).reduce((sum, p) => sum + p.length, 0)} packets`);
   return snapshot;
 }
 
@@ -175,7 +178,7 @@ export function stopRecording(sessionId: string): Map<string, OpusPacket[]> | nu
 
   const merged = new Map<string, OpusPacket[]>();
 
-  const windowStart = recording.startedAt - windowMs();
+  const windowStart = recording.startedAt - config.startLookbackSeconds * 1000;
   for (const [userId, buf] of userBuffers) {
     const bufferPackets = buf.packets.filter(
       p => p.timestamp >= windowStart && p.timestamp < recording.startedAt

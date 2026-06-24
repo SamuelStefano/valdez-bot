@@ -14,7 +14,20 @@ export const data = new SlashCommandBuilder()
     sub.setName('stop').setDescription('Para a gravação e envia o áudio')
   )
   .addSubcommand(sub =>
-    sub.setName('clip').setDescription('Salva apenas os últimos 2 minutos como clip')
+    sub.setName('clip')
+      .setDescription('Salva os últimos N minutos como clip')
+      .addIntegerOption(opt =>
+        opt.setName('duracao')
+          .setDescription('Quanto tempo voltar (default 2min)')
+          .addChoices(
+            { name: '30 segundos', value: 30 },
+            { name: '1 minuto', value: 60 },
+            { name: '2 minutos', value: 120 },
+            { name: '5 minutos', value: 300 },
+            { name: '10 minutos', value: 600 },
+            { name: '15 minutos', value: 900 },
+          )
+      )
   );
 
 async function getClipsChannel(interaction: ChatInputCommandInteraction): Promise<TextChannel | null> {
@@ -81,9 +94,12 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   if (sub === 'clip') {
     await interaction.deferReply();
 
-    const snapshot = getBufferSnapshot();
+    const durationSec = interaction.options.getInteger('duracao') ?? config.defaultClipSeconds;
+    const label = durationSec < 60 ? `${durationSec}s` : `${Math.round(durationSec / 60)}min`;
+
+    const snapshot = getBufferSnapshot(durationSec);
     if (snapshot.size === 0) {
-      await interaction.editReply('❌ Buffer vazio — ninguém falou nos últimos 2 minutos.');
+      await interaction.editReply(`❌ Buffer vazio — ninguém falou nos últimos ${label}.`);
       return;
     }
 
@@ -96,12 +112,12 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       const clipsChannel = await getClipsChannel(interaction);
       if (clipsChannel) {
         await clipsChannel.send({
-          content: `🎬 **Clip** por **${interaction.user.displayName}**`,
+          content: `🎬 **Clip ${label}** por **${interaction.user.displayName}**`,
           files: [attachment],
         });
-        await interaction.editReply(`🎬 **Clip enviado para <#${config.logChannelId}>!**`);
+        await interaction.editReply(`🎬 **Clip de ${label} enviado para <#${config.logChannelId}>!**`);
       } else {
-        await interaction.editReply({ content: '🎬 **Clip dos últimos 2 minutos!**', files: [attachment] });
+        await interaction.editReply({ content: `🎬 **Clip dos últimos ${label}!**`, files: [attachment] });
       }
 
       setTimeout(() => { try { fs.unlinkSync(filePath); } catch {} }, 30_000);

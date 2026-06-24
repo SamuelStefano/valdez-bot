@@ -13,8 +13,10 @@ export const config = {
   voiceChannelId: required('VOICE_CHANNEL_ID'),
   clientId: required('CLIENT_ID'),
   logChannelId: process.env.LOG_CHANNEL_ID || null,
-  replayBufferSeconds: 120, // 2 minutes
-  maxRecordingSeconds: 600, // 10 minutes max recording
+  replayBufferSeconds: 900, // 15 minutes — buffer capacity (max clip duration)
+  defaultClipSeconds: 120, // default duration for /replay clip
+  startLookbackSeconds: 120, // lookback at /replay start
+  maxRecordingSeconds: 900, // 15 minutes max recording
   spotify: {
     clientId: process.env.SPOTIFY_CLIENT_ID || '',
     clientSecret: process.env.SPOTIFY_CLIENT_SECRET || '',
