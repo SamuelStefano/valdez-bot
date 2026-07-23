@@ -13,12 +13,42 @@ import { startBuffering, resetBuffering } from './replayBuffer';
 
 let connection: VoiceConnection | null = null;
 let reconnectTimeout: NodeJS.Timeout | null = null;
+let autoJoinEnabled = true;
 
 export function getConnection(): VoiceConnection | null {
   return connection;
 }
 
+export function isPresenceEnabled(): boolean {
+  return autoJoinEnabled;
+}
+
+export async function setPresence(client: Client, enabled: boolean): Promise<void> {
+  autoJoinEnabled = enabled;
+  if (enabled) {
+    await joinChannel(client);
+  } else {
+    leaveChannel();
+  }
+}
+
+export function leaveChannel(): void {
+  if (reconnectTimeout) {
+    clearTimeout(reconnectTimeout);
+    reconnectTimeout = null;
+  }
+  if (connection) {
+    connection.removeAllListeners();
+    connection.destroy();
+    connection = null;
+  }
+  resetBuffering();
+  logger.info('[VOICE] Left channel (presence disabled)');
+}
+
 export async function joinChannel(client: Client): Promise<void> {
+  if (!autoJoinEnabled) return;
+
   // Clean up any existing connection
   const existing = getVoiceConnection(config.guildId);
   if (existing) {
@@ -146,6 +176,7 @@ function setupAntiMove(client: Client) {
 }
 
 function scheduleReconnect(client: Client, delay = 30_000) {
+  if (!autoJoinEnabled) return;
   if (reconnectTimeout) clearTimeout(reconnectTimeout);
   logger.info(`[VOICE] Scheduling reconnect in ${delay / 1000}s`);
   reconnectTimeout = setTimeout(() => {

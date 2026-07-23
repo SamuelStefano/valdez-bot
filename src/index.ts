@@ -16,6 +16,7 @@ import * as leaderboard from './commands/leaderboard';
 import * as replay from './commands/replay';
 import * as playCmd from './commands/play';
 import * as music from './commands/music';
+import * as call from './commands/call';
 
 const commands = new Map<string, { execute: (i: ChatInputCommandInteraction) => Promise<void> }>();
 commands.set('ping', ping);
@@ -24,6 +25,7 @@ commands.set('leaderboard', leaderboard);
 commands.set('replay', replay);
 commands.set('play', playCmd);
 commands.set('music', music);
+commands.set('call', call);
 
 const allCommandsData = [
   ping.data.toJSON(),
@@ -32,6 +34,7 @@ const allCommandsData = [
   replay.data.toJSON(),
   playCmd.data.toJSON(),
   music.data.toJSON(),
+  call.data.toJSON(),
 ];
 
 const client = new Client({
