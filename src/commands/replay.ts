@@ -1,8 +1,9 @@
 import { ChatInputCommandInteraction, SlashCommandBuilder, AttachmentBuilder, TextChannel } from 'discord.js';
 import { getBufferSnapshot, startRecording, stopRecording, getActiveRecordings } from '../modules/replayBuffer';
-import { exportToOgg } from '../utils/audioExporter';
+import { exportToMp3 } from '../utils/audioExporter';
 import { config } from '../config';
 import fs from 'fs';
+import path from 'path';
 
 export const data = new SlashCommandBuilder()
   .setName('replay')
@@ -70,8 +71,8 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
     try {
       const filename = `replay_${Date.now()}`;
-      const filePath = await exportToOgg(packets, filename);
-      const attachment = new AttachmentBuilder(filePath, { name: `${filename}.ogg` });
+      const filePath = await exportToMp3(packets, filename);
+      const attachment = new AttachmentBuilder(filePath, { name: path.basename(filePath) });
 
       // Send to clips channel
       const clipsChannel = await getClipsChannel(interaction);
@@ -105,8 +106,8 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
     try {
       const filename = `clip_${Date.now()}`;
-      const filePath = await exportToOgg(snapshot, filename);
-      const attachment = new AttachmentBuilder(filePath, { name: `${filename}.ogg` });
+      const filePath = await exportToMp3(snapshot, filename);
+      const attachment = new AttachmentBuilder(filePath, { name: path.basename(filePath) });
 
       // Send to clips channel
       const clipsChannel = await getClipsChannel(interaction);

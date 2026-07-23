@@ -24,14 +24,14 @@ try {
 }
 
 /**
- * Decode Opus packets to raw PCM, then encode to OGG via ffmpeg.
+ * Decode Opus packets to raw PCM, then encode to MP3 via ffmpeg.
  * Discord sends 48kHz stereo Opus at 20ms frames (960 samples per channel).
  */
-export async function exportToOgg(
+export async function exportToMp3(
   packets: Map<string, OpusPacket[]>,
   filename: string
 ): Promise<string> {
-  const outputPath = path.join(RECORDINGS_DIR, `${filename}.ogg`);
+  const outputPath = path.join(RECORDINGS_DIR, `${filename}.mp3`);
 
   const allPackets: OpusPacket[] = [];
   for (const userPackets of packets.values()) allPackets.push(...userPackets);
@@ -48,7 +48,7 @@ export async function exportToOgg(
   const pcmBuffer = mixToPcm(packets, allPackets);
   logger.info(`Exporting mixed audio to ${outputPath} (${pcmBuffer.length} bytes PCM)`);
 
-  // Pipe raw PCM to ffmpeg → OGG/Opus
+  // Pipe raw PCM to ffmpeg → MP3
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
       ffmpeg.kill('SIGKILL');
@@ -61,8 +61,8 @@ export async function exportToOgg(
       '-ar', '48000',         // 48kHz sample rate
       '-ac', '2',             // Stereo
       '-i', 'pipe:0',         // Read from stdin
-      '-c:a', 'libopus',      // Output codec: Opus
-      '-b:a', '96k',          // Bitrate
+      '-c:a', 'libmp3lame',   // Output codec: MP3
+      '-b:a', '192k',         // Bitrate
       outputPath,
     ]);
 
