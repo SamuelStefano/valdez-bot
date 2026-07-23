@@ -4,7 +4,7 @@ setDefaultResultOrder('ipv4first');
 import { Client, GatewayIntentBits, ChatInputCommandInteraction, REST, Routes } from 'discord.js';
 import { config } from './config';
 import { logger } from './utils/logger';
-import { joinChannel } from './modules/voiceManager';
+import { setupAutoPresence, evaluatePresence } from './modules/voiceManager';
 import { setupVoiceTracker } from './modules/voiceTracker';
 import { initMusicModal, handleMusicButton } from './modules/musicModal';
 import { logSpotifyStatus } from './utils/spotifyApi';
@@ -75,9 +75,10 @@ client.once('ready', async () => {
   }
 
   setupVoiceTracker(client);
+  setupAutoPresence(client);
   initMusicModal(client);
   startHeartbeat(client);
-  joinChannel(client);
+  evaluatePresence(client);
 });
 
 client.on('interactionCreate', async (interaction) => {

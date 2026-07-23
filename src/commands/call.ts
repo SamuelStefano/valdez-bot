@@ -1,34 +1,39 @@
 import { ChatInputCommandInteraction, SlashCommandBuilder } from 'discord.js';
-import { setPresence, isPresenceEnabled } from '../modules/voiceManager';
+import { setPresence, isPresenceEnabled, isConnected } from '../modules/voiceManager';
 
 export const data = new SlashCommandBuilder()
   .setName('call')
-  .setDescription('Controla se o Valdez fica na call')
-  .addSubcommand(sub => sub.setName('entrar').setDescription('Entra na call e mantém presença'))
-  .addSubcommand(sub => sub.setName('sair').setDescription('Sai da call e para de reconectar'))
-  .addSubcommand(sub => sub.setName('status').setDescription('Mostra se a presença está ativa'));
+  .setDescription('Controla a presença automática do Valdez na call')
+  .addSubcommand(sub => sub.setName('entrar').setDescription('Reativa a presença automática (entra quando tiver gente)'))
+  .addSubcommand(sub => sub.setName('sair').setDescription('Desativa a presença automática e sai da call'))
+  .addSubcommand(sub => sub.setName('status').setDescription('Mostra o estado da presença'));
 
 export async function execute(interaction: ChatInputCommandInteraction) {
   const sub = interaction.options.getSubcommand();
 
   if (sub === 'status') {
-    await interaction.reply({
-      content: isPresenceEnabled() ? '🟢 Presença **ativa** — o Valdez fica na call.' : '⚪ Presença **desativada** — o Valdez fica fora da call.',
-      ephemeral: true,
-    });
+    if (!isPresenceEnabled()) {
+      await interaction.reply({ content: '⚪ Presença automática **desativada** — fico fora até `/call entrar`.', ephemeral: true });
+    } else {
+      await interaction.reply({
+        content: isConnected()
+          ? '🟢 Presença automática **ativa** — estou na call.'
+          : '🟡 Presença automática **ativa** — call vazia, entro quando alguém chegar.',
+        ephemeral: true,
+      });
+    }
     return;
   }
 
   if (sub === 'entrar') {
-    await interaction.deferReply({ ephemeral: true });
     await setPresence(interaction.client, true);
-    await interaction.editReply('🟢 Entrando na call e mantendo presença.');
+    await interaction.reply({ content: '🟢 Presença automática reativada — entro quando tiver gente na call.', ephemeral: true });
     return;
   }
 
   if (sub === 'sair') {
     await setPresence(interaction.client, false);
-    await interaction.reply({ content: '⚪ Saí da call. Não vou reconectar até `/call entrar`.', ephemeral: true });
+    await interaction.reply({ content: '⚪ Presença automática desativada — saí e não volto até `/call entrar`.', ephemeral: true });
     return;
   }
 }

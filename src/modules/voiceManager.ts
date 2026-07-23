@@ -23,10 +23,14 @@ export function isPresenceEnabled(): boolean {
   return autoJoinEnabled;
 }
 
+export function isConnected(): boolean {
+  return !!connection && connection.state.status !== VoiceConnectionStatus.Destroyed;
+}
+
 export async function setPresence(client: Client, enabled: boolean): Promise<void> {
   autoJoinEnabled = enabled;
   if (enabled) {
-    await joinChannel(client);
+    evaluatePresence(client);
   } else {
     leaveChannel();
   }
@@ -43,7 +47,34 @@ export function leaveChannel(): void {
     connection = null;
   }
   resetBuffering();
-  logger.info('[VOICE] Left channel (presence disabled)');
+  logger.info('[VOICE] Left channel');
+}
+
+function countHumans(client: Client): number {
+  const guild = client.guilds.cache.get(config.guildId);
+  const channel = guild?.channels.cache.get(config.voiceChannelId);
+  if (!channel || !channel.isVoiceBased()) return 0;
+  return channel.members.filter(m => !m.user.bot).size;
+}
+
+// Join when there are humans in the channel, leave when it empties.
+export function evaluatePresence(client: Client): void {
+  if (!autoJoinEnabled) return;
+  const humans = countHumans(client);
+  if (humans > 0 && !isConnected()) {
+    joinChannel(client);
+  } else if (humans === 0 && isConnected()) {
+    logger.info('[VOICE] Channel empty — leaving');
+    leaveChannel();
+  }
+}
+
+export function setupAutoPresence(client: Client): void {
+  client.on('voiceStateUpdate', (oldState: VoiceState, newState: VoiceState) => {
+    if (oldState.member?.user.bot || newState.member?.user.bot) return;
+    if (oldState.channelId !== config.voiceChannelId && newState.channelId !== config.voiceChannelId) return;
+    evaluatePresence(client);
+  });
 }
 
 export async function joinChannel(client: Client): Promise<void> {
@@ -180,8 +211,9 @@ function scheduleReconnect(client: Client, delay = 30_000) {
   if (reconnectTimeout) clearTimeout(reconnectTimeout);
   logger.info(`[VOICE] Scheduling reconnect in ${delay / 1000}s`);
   reconnectTimeout = setTimeout(() => {
-    logger.info('[VOICE] Attempting reconnect...');
-    joinChannel(client);
+    reconnectTimeout = null;
+    logger.info('[VOICE] Re-evaluating presence...');
+    evaluatePresence(client);
   }, delay);
 }
 
