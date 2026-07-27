@@ -9,11 +9,17 @@ import {
 import { Client, ChannelType, VoiceState } from 'discord.js';
 import { config } from '../config';
 import { logger } from '../utils/logger';
-import { startBuffering, resetBuffering } from './replayBuffer';
+import { startBuffering, resetBuffering, getLastActivityAt } from './replayBuffer';
 
 let connection: VoiceConnection | null = null;
 let reconnectTimeout: NodeJS.Timeout | null = null;
 let autoJoinEnabled = true;
+let watchdogInterval: NodeJS.Timeout | null = null;
+
+const WATCHDOG_TICK_MS = 60_000;
+// Force a rejoin if we are connected with people present but no audio has
+// arrived for this long — the receiver died silently (no Disconnected event).
+const AUDIO_STALE_MS = 5 * 60_000;
 
 export function getConnection(): VoiceConnection | null {
   return connection;
@@ -75,6 +81,41 @@ export function setupAutoPresence(client: Client): void {
     if (oldState.channelId !== config.voiceChannelId && newState.channelId !== config.voiceChannelId) return;
     evaluatePresence(client);
   });
+}
+
+// Discord can stop delivering audio without ever firing Disconnected — the
+// connection stays Ready while the receiver is dead. Poll for that: if humans
+// are present but no audio arrived for AUDIO_STALE_MS, tear down and rejoin to
+// rebuild the receiver. Also a safety net for a missed empty-channel event.
+export function startVoiceWatchdog(client: Client): void {
+  if (watchdogInterval) return;
+  watchdogInterval = setInterval(() => {
+    if (!autoJoinEnabled) return;
+
+    const humans = countHumans(client);
+    if (humans === 0) {
+      if (isConnected()) {
+        logger.info('[VOICE] Watchdog: channel empty — leaving');
+        leaveChannel();
+      }
+      return;
+    }
+
+    if (!isConnected()) {
+      logger.info('[VOICE] Watchdog: humans present but not connected — joining');
+      joinChannel(client);
+      return;
+    }
+
+    const last = getLastActivityAt();
+    if (last === 0) return; // buffering not yet (re)started — nothing to judge
+    const idleMs = Date.now() - last;
+    if (idleMs > AUDIO_STALE_MS) {
+      logger.warn(`[VOICE] Watchdog: no audio for ${Math.round(idleMs / 1000)}s with ${humans} present — forcing rejoin`);
+      leaveChannel();
+      joinChannel(client);
+    }
+  }, WATCHDOG_TICK_MS);
 }
 
 export async function joinChannel(client: Client): Promise<void> {

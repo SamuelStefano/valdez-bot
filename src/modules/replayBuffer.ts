@@ -25,6 +25,14 @@ let isBuffering = false;
 let trimInterval: NodeJS.Timeout | null = null;
 let activeReceiver: VoiceReceiver | null = null;
 let speakingHandler: ((userId: string) => void) | null = null;
+let lastActivityAt = 0;
+
+// Timestamp of the last speaking/packet event, or 0 when not buffering. The
+// voice watchdog uses this to detect a silently-dead receiver (connection stays
+// Ready but Discord stops delivering audio) and force a rejoin.
+export function getLastActivityAt(): number {
+  return lastActivityAt;
+}
 
 function windowMs() {
   return config.replayBufferSeconds * 1000;
@@ -47,6 +55,7 @@ export function startBuffering(connection: VoiceConnection) {
   // attachment before re-attaching — otherwise the new connection is never read.
   if (isBuffering) resetBuffering();
   isBuffering = true;
+  lastActivityAt = Date.now();
 
   // Evict packets that fell out of the window even while a user is silent.
   // Without this, someone who spoke then went quiet keeps stale packets forever.
@@ -64,6 +73,7 @@ export function startBuffering(connection: VoiceConnection) {
 
   // Log when anyone starts speaking
   speakingHandler = (userId: string) => {
+    lastActivityAt = Date.now();
     logger.info(`[BUFFER] User ${userId} started speaking`);
 
     if (userBuffers.get(userId)?.isSubscribed) return;
@@ -77,6 +87,7 @@ export function startBuffering(connection: VoiceConnection) {
     let packetCount = 0;
 
     opusStream.on('data', (chunk: Buffer) => {
+      lastActivityAt = Date.now();
       packetCount++;
       if (packetCount === 1) {
         logger.info(`[BUFFER] First packet from ${userId}, size: ${chunk.length} bytes`);
@@ -123,6 +134,7 @@ export function startBuffering(connection: VoiceConnection) {
 
 export function resetBuffering() {
   isBuffering = false;
+  lastActivityAt = 0;
   if (trimInterval) {
     clearInterval(trimInterval);
     trimInterval = null;
