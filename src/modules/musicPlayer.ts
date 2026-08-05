@@ -7,7 +7,7 @@ import {
   StreamType,
 } from '@discordjs/voice';
 import { logger } from '../utils/logger';
-import { getConnection, unmute, mute } from './voiceManager';
+import { getConnection, unmute, mute, setMusicActive } from './voiceManager';
 import { fetchSpotifyAlbum, fetchSpotifyPlaylist, fetchSpotifyTrack, SpotifyTrack } from '../utils/spotifyApi';
 import { ytInfo, ytPlaylist, ytSearch, ytStream } from '../utils/ytdlp';
 
@@ -259,6 +259,7 @@ async function playNext(guildId: string) {
 
   if (queue.tracks.length === 0) {
     queue.current = null;
+    setMusicActive(false);
     mute();
     emit(guildId, 'stopped');
     return;
@@ -279,6 +280,7 @@ async function playNext(guildId: string) {
     }
 
     queue.player.play(resource);
+    setMusicActive(true);
     logger.info(`Now playing: ${track.title}`);
     emit(guildId, 'trackStart');
   } catch (err) {

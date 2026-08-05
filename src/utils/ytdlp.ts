@@ -60,12 +60,16 @@ function toInfo(j: any): YtInfo {
 
 export async function ytSearch(query: string, limit = 1): Promise<YtInfo[]> {
   const term = `ytsearch${limit}:${query}`;
+  // --flat-playlist: return id/title/url/duration without extracting each
+  // result's player. Full extraction hits YouTube's player endpoint, which
+  // trips "confirm you're not a bot" from datacenter IPs and breaks the whole
+  // search on a single gated video. The player is only extracted later, at
+  // stream time (ytStream), where a failing track is skipped gracefully.
   const items = await runJson([
     term,
     '--dump-json',
+    '--flat-playlist',
     '--no-warnings',
-    '--no-playlist',
-    '--skip-download',
     ...commonArgs(),
   ]);
   return items.map(toInfo);

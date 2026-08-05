@@ -15,11 +15,20 @@ let connection: VoiceConnection | null = null;
 let reconnectTimeout: NodeJS.Timeout | null = null;
 let autoJoinEnabled = true;
 let watchdogInterval: NodeJS.Timeout | null = null;
+let musicActive = false;
 
 const WATCHDOG_TICK_MS = 60_000;
 // Force a rejoin if we are connected with people present but no audio has
 // arrived for this long — the receiver died silently (no Disconnected event).
-const AUDIO_STALE_MS = 5 * 60_000;
+// Generous so ordinary quiet stretches don't churn the connection.
+const AUDIO_STALE_MS = 12 * 60_000;
+
+// While the bot is playing music it is actively transmitting, which proves the
+// connection is alive and must not be torn down — silence on the receive side
+// is expected (listeners are quiet), so the watchdog leaves it alone.
+export function setMusicActive(active: boolean): void {
+  musicActive = active;
+}
 
 export function getConnection(): VoiceConnection | null {
   return connection;
@@ -107,6 +116,7 @@ export function startVoiceWatchdog(client: Client): void {
       return;
     }
 
+    if (musicActive) return; // transmitting proves liveness; never cut playback
     const last = getLastActivityAt();
     if (last === 0) return; // buffering not yet (re)started — nothing to judge
     const idleMs = Date.now() - last;
