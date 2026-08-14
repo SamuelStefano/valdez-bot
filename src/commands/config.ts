@@ -8,6 +8,7 @@ import {
 import { getSettings, saveSettings, optOutCount } from '../modules/guildSettings';
 import { evaluatePresence, leaveChannel, isConnected } from '../modules/voiceManager';
 import { limits, upsell, getLicense, daysLeft } from '../modules/licensing';
+import { stopLiveCounter } from '../modules/liveCounter';
 
 export const data = new SlashCommandBuilder()
   .setName('config')
@@ -36,6 +37,14 @@ export const data = new SlashCommandBuilder()
           .setDescription('Canal de texto')
           .addChannelTypes(ChannelType.GuildText)
           .setRequired(true)
+      )
+  )
+  .addSubcommand((sub) =>
+    sub
+      .setName('contador')
+      .setDescription('Liga ou desliga o contador de horas ao vivo na call')
+      .addBooleanOption((opt) =>
+        opt.setName('ligado').setDescription('Deixar o contador na call').setRequired(true)
       )
   )
   .addSubcommand((sub) => sub.setName('status').setDescription('Mostra a configuração atual'));
@@ -94,6 +103,24 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     return;
   }
 
+  if (sub === 'contador') {
+    if (!limits(guildId).stats) {
+      await interaction.reply({ content: upsell('Contador de horas ao vivo'), ephemeral: true });
+      return;
+    }
+    const ligado = interaction.options.getBoolean('ligado', true);
+    saveSettings({ guildId, liveCounter: ligado });
+    if (!ligado) stopLiveCounter(interaction.client, guildId);
+
+    await interaction.reply({
+      content: ligado
+        ? '✅ Contador ligado. Ele aparece na call e se atualiza sozinho a cada minuto.'
+        : '⚪ Contador desligado. Use `/horas` quando quiser ver seu tempo.',
+      ephemeral: true,
+    });
+    return;
+  }
+
   const settings = getSettings(guildId);
   const plan = limits(guildId);
   const license = getLicense(guildId);
@@ -113,6 +140,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
         value: settings.clipsChannelId ? `<#${settings.clipsChannelId}>` : 'responde no próprio canal do comando',
       },
       { name: 'Presença automática', value: settings.autoJoin ? '🟢 ativa' : '⚪ desativada', inline: true },
+      { name: 'Contador na call', value: settings.liveCounter ? '🟢 ligado' : '⚪ desligado', inline: true },
       { name: 'Na call agora', value: isConnected(guildId) ? 'sim' : 'não', inline: true },
       { name: 'Buffer', value: `últimos ${minutes} min`, inline: true },
       { name: 'Opt-outs', value: `${optOutCount(guildId)} membro(s)`, inline: true },

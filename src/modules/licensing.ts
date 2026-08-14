@@ -65,6 +65,7 @@ export interface License {
   founder: boolean;
   startedAt: number;
   expiresAt: number | null;
+  ownerId?: string | null;
 }
 
 interface Row {
@@ -74,6 +75,15 @@ interface Row {
   founder: number;
   started_at: number;
   expires_at: number | null;
+  owner_id: string | null;
+}
+
+// Quem é o dono do servidor só o Client sabe. Injetado no boot pra este módulo
+// não importar discord.js e virar dependência circular do index.
+let resolveOwner: (guildId: string) => string | null = () => null;
+
+export function setOwnerResolver(fn: (guildId: string) => string | null): void {
+  resolveOwner = fn;
 }
 
 // Cache em memória porque todo pacote de voz consulta a janela do buffer.
@@ -87,6 +97,7 @@ function toLicense(row: Row): License {
     founder: row.founder === 1,
     startedAt: row.started_at,
     expiresAt: row.expires_at,
+    ownerId: row.owner_id,
   };
 }
 
@@ -121,13 +132,35 @@ export function saveLicense(license: License): License {
     started_at: license.startedAt,
     expires_at: license.expiresAt,
     updated_at: now(),
+    owner_id: license.ownerId ?? null,
   });
   cache.set(license.guildId, license);
   return license;
 }
 
+// O teste é ancorado no dono, não no servidor: criar servidor novo é grátis e
+// instantâneo, então cota por guild não segura ninguém. Isso encarece a burla —
+// só fecha de vez com cartão.
 export function startTrial(guildId: string): License {
   const startedAt = now();
+  const ownerId = resolveOwner(guildId);
+
+  if (ownerId) {
+    const { n } = dbStatements.countTrialsByOwner.get(ownerId, guildId) as { n: number };
+    if (n > 0) {
+      logger.info(`[LICENSE] ${guildId}: dono ${ownerId} já usou o teste — entra bloqueado`);
+      return saveLicense({
+        guildId,
+        plan: 'trial',
+        status: 'expired',
+        founder: false,
+        startedAt,
+        expiresAt: startedAt,
+        ownerId,
+      });
+    }
+  }
+
   return saveLicense({
     guildId,
     plan: 'trial',
@@ -135,6 +168,7 @@ export function startTrial(guildId: string): License {
     founder: false,
     startedAt,
     expiresAt: startedAt + TRIAL_DAYS * 86400,
+    ownerId,
   });
 }
 

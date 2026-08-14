@@ -11,8 +11,15 @@ import {
   dropGuildVoice,
 } from './modules/voiceManager';
 import { setupVoiceTracker } from './modules/voiceTracker';
+import { setupLiveCounter } from './modules/liveCounter';
 import { loadAllSettings, forgetGuild } from './modules/guildSettings';
-import { loadLicenses, getLicense, dropLicenseCache, ensureOwnerLicense } from './modules/licensing';
+import {
+  loadLicenses,
+  getLicense,
+  dropLicenseCache,
+  ensureOwnerLicense,
+  setOwnerResolver,
+} from './modules/licensing';
 import { track } from './modules/telemetry';
 import { clearExpiredNotice } from './modules/billingNotice';
 import { sendOnboarding } from './modules/onboarding';
@@ -89,6 +96,7 @@ client.once('ready', async () => {
 
   logSpotifyStatus();
   loadAllSettings();
+  setOwnerResolver((guildId) => client.guilds.cache.get(guildId)?.ownerId ?? null);
   loadLicenses();
   if (config.seedGuildId) ensureOwnerLicense(config.seedGuildId);
 
@@ -108,6 +116,7 @@ client.once('ready', async () => {
   }
 
   setupVoiceTracker(client);
+  setupLiveCounter(client);
   setupAutoPresence(client);
   initMusicModal(client);
   startHeartbeat(client);

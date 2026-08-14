@@ -79,6 +79,19 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_feedback_unsynced ON feedback(synced);
 `);
 
+// SQLite não tem ADD COLUMN IF NOT EXISTS e o banco em produção já existe, então
+// a checagem é feita na mão a cada boot.
+function addColumn(table: string, column: string, definition: string): void {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+  if (cols.some((c) => c.name === column)) return;
+  db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+}
+
+addColumn('guild_settings', 'live_counter', 'INTEGER NOT NULL DEFAULT 0');
+addColumn('licenses', 'owner_id', 'TEXT');
+
+db.exec(`CREATE INDEX IF NOT EXISTS idx_licenses_owner ON licenses(owner_id)`);
+
 export const dbStatements: Record<string, Statement> = {
   startSession: db.prepare(`
     INSERT INTO voice_sessions (user_id, username, guild_id, channel_id, joined_at)
@@ -136,12 +149,13 @@ export const dbStatements: Record<string, Statement> = {
   listGuildSettings: db.prepare(`SELECT * FROM guild_settings`),
 
   upsertGuildSettings: db.prepare(`
-    INSERT INTO guild_settings (guild_id, voice_channel_id, clips_channel_id, auto_join, joined_at)
-    VALUES (@guild_id, @voice_channel_id, @clips_channel_id, @auto_join, @joined_at)
+    INSERT INTO guild_settings (guild_id, voice_channel_id, clips_channel_id, auto_join, live_counter, joined_at)
+    VALUES (@guild_id, @voice_channel_id, @clips_channel_id, @auto_join, @live_counter, @joined_at)
     ON CONFLICT(guild_id) DO UPDATE SET
       voice_channel_id = excluded.voice_channel_id,
       clips_channel_id = excluded.clips_channel_id,
-      auto_join = excluded.auto_join
+      auto_join = excluded.auto_join,
+      live_counter = excluded.live_counter
   `),
 
   deleteGuildSettings: db.prepare(`DELETE FROM guild_settings WHERE guild_id = ?`),
@@ -159,14 +173,20 @@ export const dbStatements: Record<string, Statement> = {
   listLicenses: db.prepare(`SELECT * FROM licenses`),
 
   upsertLicense: db.prepare(`
-    INSERT INTO licenses (guild_id, plan, status, founder, started_at, expires_at, updated_at)
-    VALUES (@guild_id, @plan, @status, @founder, @started_at, @expires_at, @updated_at)
+    INSERT INTO licenses (guild_id, plan, status, founder, started_at, expires_at, updated_at, owner_id)
+    VALUES (@guild_id, @plan, @status, @founder, @started_at, @expires_at, @updated_at, @owner_id)
     ON CONFLICT(guild_id) DO UPDATE SET
       plan = excluded.plan,
       status = excluded.status,
       founder = excluded.founder,
       expires_at = excluded.expires_at,
-      updated_at = excluded.updated_at
+      updated_at = excluded.updated_at,
+      owner_id = COALESCE(excluded.owner_id, licenses.owner_id)
+  `),
+
+  countTrialsByOwner: db.prepare(`
+    SELECT COUNT(*) as n FROM licenses
+    WHERE owner_id = ? AND guild_id != ? AND plan = 'trial'
   `),
 
   countFounders: db.prepare(`SELECT COUNT(*) as n FROM licenses WHERE founder = 1`),

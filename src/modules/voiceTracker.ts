@@ -62,6 +62,15 @@ export function getActiveSession(guildId: string, userId: string): number | unde
   return activeSessions.get(sessionKey(guildId, userId));
 }
 
+export function listActiveSessions(guildId: string): { userId: string; joinedAt: number }[] {
+  const prefix = `${guildId}:`;
+  const out: { userId: string; joinedAt: number }[] = [];
+  for (const [key, joinedAt] of activeSessions) {
+    if (key.startsWith(prefix)) out.push({ userId: key.slice(prefix.length), joinedAt });
+  }
+  return out.sort((a, b) => a.joinedAt - b.joinedAt);
+}
+
 export function formatDuration(totalSeconds: number): string {
   const hours = Math.floor(totalSeconds / 3600);
   const minutes = Math.floor((totalSeconds % 3600) / 60);
