@@ -10,6 +10,14 @@ import { evaluatePresence, leaveChannel, isConnected } from '../modules/voiceMan
 import { limits, upsell, getLicense, daysLeft, SUPPORT_LABEL } from '../modules/licensing';
 import { stopLiveCounter } from '../modules/liveCounter';
 import { formatLabel } from '../modules/clipPublisher';
+import {
+  listRewards,
+  setReward,
+  removeReward,
+  rewardIssue,
+  MAX_REWARDS,
+  MAX_LEVEL,
+} from '../modules/roleRewards';
 
 export const data = new SlashCommandBuilder()
   .setName('config')
@@ -48,6 +56,34 @@ export const data = new SlashCommandBuilder()
         opt.setName('ligado').setDescription('Deixar o contador na call').setRequired(true)
       )
   )
+  .addSubcommandGroup((group) =>
+    group
+      .setName('cargos')
+      .setDescription('Cargos entregues por nível de tempo em call')
+      .addSubcommand((sub) =>
+        sub
+          .setName('add')
+          .setDescription('Entrega um cargo quando alguém chega no nível')
+          .addIntegerOption((opt) =>
+            opt
+              .setName('nivel')
+              .setDescription('Nível que libera o cargo')
+              .setMinValue(2)
+              .setMaxValue(MAX_LEVEL)
+              .setRequired(true)
+          )
+          .addRoleOption((opt) => opt.setName('cargo').setDescription('Cargo entregue').setRequired(true))
+      )
+      .addSubcommand((sub) =>
+        sub
+          .setName('remover')
+          .setDescription('Tira o cargo de um nível')
+          .addIntegerOption((opt) =>
+            opt.setName('nivel').setDescription('Nível a remover').setRequired(true)
+          )
+      )
+      .addSubcommand((sub) => sub.setName('lista').setDescription('Lista os cargos por nível'))
+  )
   .addSubcommand((sub) => sub.setName('status').setDescription('Mostra a configuração atual'));
 
 // Sem ChangeNickname o bot não consegue mostrar o [REC] e, por decisão de
@@ -66,6 +102,93 @@ function missingPermissions(interaction: ChatInputCommandInteraction): string[] 
   return REQUIRED_PERMISSIONS.filter(([flag]) => !me.permissions.has(flag)).map(([, name]) => name);
 }
 
+function rewardsList(guildId: string): string {
+  const rewards = listRewards(guildId);
+  if (rewards.length === 0) return 'nenhum — `/config cargos add`';
+  return rewards.map((r) => `Nível **${r.level}** → <@&${r.roleId}>`).join('\n');
+}
+
+// O cargo só é entregue de verdade se o bot puder mexer nele. Avisar na hora da
+// configuração evita o admin descobrir pelo membro que nunca ganhou nada.
+function hierarchyWarning(interaction: ChatInputCommandInteraction, rolePosition: number): string | null {
+  const me = interaction.guild?.members.me;
+  if (!me) return null;
+  if (!me.permissions.has(PermissionFlagsBits.ManageRoles)) {
+    return '⚠️ Falta a permissão **Gerenciar Cargos** — sem ela não entrego cargo nenhum.';
+  }
+  if (rolePosition >= me.roles.highest.position) {
+    return '⚠️ Esse cargo está **acima do Valdez** na lista de cargos. Arraste o cargo do bot pra cima dele.';
+  }
+  return null;
+}
+
+async function handleCargos(
+  interaction: ChatInputCommandInteraction,
+  guildId: string,
+  sub: string
+): Promise<void> {
+  if (!limits(guildId).stats) {
+    await interaction.reply({ content: upsell('Cargos por tempo de call'), ephemeral: true });
+    return;
+  }
+
+  if (sub === 'lista') {
+    const issue = rewardIssue(guildId);
+    await interaction.reply({
+      content: `🎖️ **Cargos por nível**\n${rewardsList(guildId)}${issue ? `\n\n⚠️ ${issue}` : ''}`,
+      ephemeral: true,
+    });
+    return;
+  }
+
+  if (sub === 'remover') {
+    const level = interaction.options.getInteger('nivel', true);
+    const removed = removeReward(guildId, level);
+    await interaction.reply({
+      content: removed
+        ? `🗑️ Nível ${level} não entrega mais cargo. Quem já ganhou continua com ele.`
+        : `⚠️ Não tem cargo configurado no nível ${level}.`,
+      ephemeral: true,
+    });
+    return;
+  }
+
+  const level = interaction.options.getInteger('nivel', true);
+  const role = interaction.options.getRole('cargo', true);
+
+  if (role.id === guildId) {
+    await interaction.reply({ content: '❌ O `@everyone` todo mundo já tem.', ephemeral: true });
+    return;
+  }
+  if ('managed' in role && role.managed) {
+    await interaction.reply({
+      content: '❌ Esse cargo é de bot/integração e o Discord não deixa ninguém entregar ele.',
+      ephemeral: true,
+    });
+    return;
+  }
+
+  const existing = listRewards(guildId);
+  if (existing.length >= MAX_REWARDS && !existing.some((r) => r.level === level)) {
+    await interaction.reply({
+      content: `❌ Limite de ${MAX_REWARDS} cargos por servidor. Remova um com \`/config cargos remover\`.`,
+      ephemeral: true,
+    });
+    return;
+  }
+
+  setReward(guildId, level, role.id);
+  const warning = hierarchyWarning(interaction, 'position' in role ? role.position : 0);
+
+  await interaction.reply({
+    content:
+      `✅ Quem chegar no **nível ${level}** ganha **${role.name}**. ` +
+      'Quem já passou disso pega o cargo assim que sair da próxima call.' +
+      (warning ? `\n${warning}` : ''),
+    ephemeral: true,
+  });
+}
+
 export async function execute(interaction: ChatInputCommandInteraction) {
   const guildId = interaction.guildId;
   if (!guildId) {
@@ -74,6 +197,11 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   }
 
   const sub = interaction.options.getSubcommand();
+
+  if (interaction.options.getSubcommandGroup(false) === 'cargos') {
+    await handleCargos(interaction, guildId, sub);
+    return;
+  }
 
   if (sub === 'canal') {
     const channel = interaction.options.getChannel('voz', true);
@@ -127,6 +255,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   const license = getLicense(guildId);
   const restam = daysLeft(license);
   const missing = missingPermissions(interaction);
+  const issue = rewardIssue(guildId);
   const embed = new EmbedBuilder()
     .setColor(0x5865f2)
     .setTitle('⚙️ Configuração do Valdez')
@@ -156,6 +285,12 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       {
         name: 'Permissões',
         value: missing.length === 0 ? '✅ tudo certo' : `⚠️ faltando: ${missing.join(', ')}`,
+      },
+      {
+        name: 'Cargos por nível',
+        value: plan.stats
+          ? `${rewardsList(guildId)}${issue ? `\n⚠️ ${issue}` : ''}`
+          : '🔒 disponível no Pro — `/assinatura`',
       }
     );
 

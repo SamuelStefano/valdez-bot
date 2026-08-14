@@ -13,6 +13,7 @@ import { getSettings, saveSettings, isConfigured } from './guildSettings';
 import { showRecordingIndicator, clearRecordingIndicator, announceBuffering } from './consent';
 import { isActive } from './licensing';
 import { announceExpired } from './billingNotice';
+import { beginCall, endCall, dropCall } from './callRecap';
 
 // Estado de voz por servidor. Antes eram variáveis de módulo: com dois
 // servidores, o segundo join sobrescrevia a conexão do primeiro.
@@ -89,6 +90,7 @@ export async function leaveChannel(client: Client, guildId: string): Promise<voi
     v.connection = null;
   }
   resetBuffering(guildId);
+  dropCall(guildId);
   v.announced = false;
   await clearRecordingIndicator(client, guildId);
   logger.info(`[VOICE] ${guildId}: left channel`);
@@ -119,6 +121,7 @@ export function evaluatePresence(client: Client, guildId: string): void {
     joinChannel(client, guildId);
   } else if (humans === 0 && isConnected(guildId)) {
     logger.info(`[VOICE] ${guildId}: channel empty — leaving`);
+    endCall(client, guildId);
     void leaveChannel(client, guildId);
   }
 }
@@ -178,6 +181,7 @@ export function startVoiceWatchdog(client: Client): void {
       if (humans === 0) {
         if (isConnected(guildId)) {
           logger.info(`[VOICE] ${guildId}: watchdog — channel empty, leaving`);
+          endCall(client, guildId);
           void leaveChannel(client, guildId);
         }
         continue;
@@ -207,6 +211,7 @@ export async function joinChannel(client: Client, guildId: string): Promise<void
   const settings = getSettings(guildId);
   if (!settings.voiceChannelId || !settings.autoJoin) return;
 
+  beginCall(guildId, settings.voiceChannelId);
   const v = state(guildId);
 
   // Clean up any existing connection
@@ -345,6 +350,7 @@ export function dropGuildVoice(guildId: string): void {
     v.connection.destroy();
   }
   voices.delete(guildId);
+  dropCall(guildId);
   dropGuild(guildId);
 }
 

@@ -1,5 +1,6 @@
 import { Client, VoiceState } from 'discord.js';
 import { dbStatements } from '../utils/database';
+import { applyRoleRewards } from './roleRewards';
 import { logger } from '../utils/logger';
 
 // Chaveado por guild+user: o mesmo usuário pode estar em call de dois servidores
@@ -41,6 +42,7 @@ export function setupVoiceTracker(client: Client) {
       dbStatements.endSession.run(leftAt, leftAt, userId, guildId);
       activeSessions.delete(sessionKey(guildId, userId));
       logger.info(`${username} left voice channel`);
+      applyRoleRewards(newState.guild, userId);
     }
 
     // User switched channels
@@ -52,6 +54,7 @@ export function setupVoiceTracker(client: Client) {
       activeSessions.set(sessionKey(guildId, userId), now);
       dbStatements.startSession.run(userId, username, guildId, isInChannel, now);
       logger.info(`${username} switched voice channel`);
+      applyRoleRewards(newState.guild, userId);
     }
   });
 

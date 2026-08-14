@@ -77,6 +77,14 @@ db.exec(`
   );
 
   CREATE INDEX IF NOT EXISTS idx_feedback_unsynced ON feedback(synced);
+
+  CREATE TABLE IF NOT EXISTS role_rewards (
+    guild_id TEXT NOT NULL,
+    level INTEGER NOT NULL,
+    role_id TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (guild_id, level)
+  );
 `);
 
 // SQLite não tem ADD COLUMN IF NOT EXISTS e o banco em produção já existe, então
@@ -125,13 +133,30 @@ export const dbStatements: Record<string, Statement> = {
     LIMIT 10
   `),
 
-  getLeaderboardMonth: db.prepare(`
+  getLeaderboardSince: db.prepare(`
     SELECT user_id, username, SUM(duration_seconds) as total_seconds
     FROM voice_sessions
     WHERE guild_id = ? AND duration_seconds IS NOT NULL AND joined_at >= ?
     GROUP BY user_id
     ORDER BY total_seconds DESC
     LIMIT 10
+  `),
+
+  sessionParticipants: db.prepare(`
+    SELECT user_id, username, SUM(duration_seconds) as total_seconds,
+           MIN(joined_at) as first_join, MAX(left_at) as last_left
+    FROM voice_sessions
+    WHERE guild_id = ? AND channel_id = ? AND left_at IS NOT NULL AND left_at >= ?
+    GROUP BY user_id
+    ORDER BY total_seconds DESC
+  `),
+
+  sessionClips: db.prepare(`
+    SELECT user_id, COUNT(*) as n
+    FROM events
+    WHERE guild_id = ? AND kind IN ('clip', 'replay') AND created_at >= ?
+    GROUP BY user_id
+    ORDER BY n DESC
   `),
 
   getOpenSessions: db.prepare(`
@@ -192,6 +217,18 @@ export const dbStatements: Record<string, Statement> = {
   countFounders: db.prepare(`SELECT COUNT(*) as n FROM licenses WHERE founder = 1`),
 
   countLifetime: db.prepare(`SELECT COUNT(*) as n FROM licenses WHERE plan = 'lifetime'`),
+
+  listRoleRewards: db.prepare(`
+    SELECT level, role_id FROM role_rewards WHERE guild_id = ? ORDER BY level
+  `),
+
+  upsertRoleReward: db.prepare(`
+    INSERT INTO role_rewards (guild_id, level, role_id, created_at)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(guild_id, level) DO UPDATE SET role_id = excluded.role_id
+  `),
+
+  deleteRoleReward: db.prepare(`DELETE FROM role_rewards WHERE guild_id = ? AND level = ?`),
 
   addEvent: db.prepare(`
     INSERT INTO events (guild_id, kind, user_id, seconds, bytes, detail, created_at)

@@ -10,7 +10,9 @@ export type EventKind =
   | 'optout'
   | 'optin'
   | 'license_expired'
-  | 'export_error';
+  | 'export_error'
+  | 'role_reward'
+  | 'recap';
 
 interface EventDetail {
   userId?: string;

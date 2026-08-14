@@ -1,6 +1,6 @@
-import { Client, EmbedBuilder, PermissionFlagsBits, TextChannel, ChannelType } from 'discord.js';
-import { getSettings } from './guildSettings';
+import { Client, EmbedBuilder } from 'discord.js';
 import { getLicense, PLANS, founderSlotsLeft } from './licensing';
+import { resolveNoticeChannel } from './noticeChannel';
 import { track } from './telemetry';
 import { config } from '../config';
 import { logger } from '../utils/logger';
@@ -9,25 +9,6 @@ import { logger } from '../utils/logger';
 // entrada na call e transformaria o vencimento em spam.
 const notified = new Set<string>();
 
-function noticeChannel(client: Client, guildId: string): TextChannel | null {
-  const guild = client.guilds.cache.get(guildId);
-  const me = guild?.members.me;
-  if (!guild || !me) return null;
-
-  const configured = getSettings(guildId).clipsChannelId;
-  const target = configured ? guild.channels.cache.get(configured) : null;
-  if (target?.isTextBased() && target.permissionsFor(me)?.has(PermissionFlagsBits.SendMessages)) {
-    return target as TextChannel;
-  }
-
-  const fallback = guild.channels.cache.find(
-    (c) =>
-      c.type === ChannelType.GuildText &&
-      c.permissionsFor(me)?.has(PermissionFlagsBits.SendMessages) === true
-  );
-  return (fallback as TextChannel) ?? null;
-}
-
 export async function announceExpired(client: Client, guildId: string): Promise<void> {
   if (notified.has(guildId)) return;
   notified.add(guildId);
@@ -35,7 +16,8 @@ export async function announceExpired(client: Client, guildId: string): Promise<
   const license = getLicense(guildId);
   track(guildId, 'license_expired', { detail: license.plan });
 
-  const channel = noticeChannel(client, guildId);
+  const guild = client.guilds.cache.get(guildId);
+  const channel = guild ? resolveNoticeChannel(guild) : null;
   if (!channel) return;
 
   const slots = founderSlotsLeft();

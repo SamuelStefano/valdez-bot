@@ -48,6 +48,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
           `• Clip de até **${formatLabel(plan.maxClipSeconds)}**`,
           `• Gravação contínua: ${plan.replay ? 'sim' : 'não'}`,
           `• Canal de clipes dedicado: ${plan.clipsChannel ? 'sim' : 'não'}`,
+          `• Cargos por nível + recap de fim de call: ${plan.stats ? 'sim' : 'não'}`,
           `• Suporte: **${SUPPORT_LABEL[plan.support]}**`,
         ].join('\n'),
       },
@@ -58,7 +59,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       },
       {
         name: `${PLANS.pro.label} — R$ 30/mês`,
-        value: 'Clip de 15 min, gravação contínua, contador na call. Suporte no Discord.',
+        value: 'Clip de 15 min, gravação contínua, contador na call, cargos por nível e recap de fim de call. Suporte no Discord.',
         inline: true,
       },
       {
