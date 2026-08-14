@@ -11,6 +11,9 @@ import { logger } from '../utils/logger';
 const BATCH = 200;
 const INTERVAL_MS = 60_000;
 const RETENTION_DAYS = 30;
+const HEARTBEAT_RETENTION_DAYS = 7;
+
+let lastPruneAt = 0;
 
 function enabled(): boolean {
   return !!(config.supabaseUrl && config.supabaseServiceKey);
@@ -181,6 +184,16 @@ async function pullLicenses(client: Client): Promise<void> {
   }
 }
 
+// Um heartbeat por minuto vira meio milhão de linhas por ano. O painel só usa o
+// mais recente, então o resto é lixo pago.
+async function pruneHeartbeats(): Promise<void> {
+  const cutoff = new Date(Date.now() - HEARTBEAT_RETENTION_DAYS * 86400_000).toISOString();
+  await request(`heartbeats?at=lt.${cutoff}`, {
+    method: 'DELETE',
+    headers: headers({ Prefer: 'return=minimal' }),
+  });
+}
+
 async function runOnce(client: Client): Promise<void> {
   await pushGuilds(client);
   await pushEvents();
@@ -188,6 +201,11 @@ async function runOnce(client: Client): Promise<void> {
   await pushHeartbeat(client);
   await pullLicenses(client);
   dbStatements.pruneEvents.run(Math.floor(Date.now() / 1000) - RETENTION_DAYS * 86400);
+
+  if (Date.now() - lastPruneAt > 6 * 3600_000) {
+    lastPruneAt = Date.now();
+    await pruneHeartbeats();
+  }
 }
 
 export function startSupabaseSync(client: Client): void {
