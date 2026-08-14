@@ -84,6 +84,13 @@ client.once('ready', async () => {
     const rest = new REST({ version: '10' }).setToken(config.token);
     await rest.put(Routes.applicationCommands(config.clientId), { body: allCommandsData });
     logger.info(`Slash commands registered globally (${client.guilds.cache.size} servidores)`);
+
+    // Os comandos guild-scoped da versão single-server continuam registrados e
+    // apareceriam duplicados ao lado dos globais.
+    if (config.seedGuildId) {
+      await rest.put(Routes.applicationGuildCommands(config.clientId, config.seedGuildId), { body: [] });
+      logger.info(`Comandos guild-scoped antigos limpos em ${config.seedGuildId}`);
+    }
   } catch (err) {
     logger.error('Failed to register slash commands', err);
   }
