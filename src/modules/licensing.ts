@@ -165,6 +165,15 @@ export function daysLeft(license: License): number | null {
   return Math.max(0, Math.ceil((license.expiresAt - now()) / 86400));
 }
 
+// O servidor de origem é meu: sem isso ele cairia no teste de 14 dias e o bot
+// sairia da call de casa por falta de pagamento.
+export function ensureOwnerLicense(guildId: string): void {
+  const license = getLicense(guildId);
+  if (license.plan === 'max' && license.status === 'active' && license.expiresAt === null) return;
+  saveLicense({ ...license, plan: 'max', status: 'active', founder: true, expiresAt: null });
+  logger.info(`[LICENSE] ${guildId}: licença vitalícia do dono aplicada`);
+}
+
 // Mensagem única de bloqueio: se cada comando escrevesse a sua, o dono do
 // servidor aprenderia um texto diferente por recurso.
 export function upsell(feature: string): string {

@@ -12,7 +12,7 @@ import {
 } from './modules/voiceManager';
 import { setupVoiceTracker } from './modules/voiceTracker';
 import { loadAllSettings, forgetGuild } from './modules/guildSettings';
-import { loadLicenses, getLicense, dropLicenseCache } from './modules/licensing';
+import { loadLicenses, getLicense, dropLicenseCache, ensureOwnerLicense } from './modules/licensing';
 import { track } from './modules/telemetry';
 import { clearExpiredNotice } from './modules/billingNotice';
 import { sendOnboarding } from './modules/onboarding';
@@ -90,6 +90,7 @@ client.once('ready', async () => {
   logSpotifyStatus();
   loadAllSettings();
   loadLicenses();
+  if (config.seedGuildId) ensureOwnerLicense(config.seedGuildId);
 
   try {
     const rest = new REST({ version: '10' }).setToken(config.token);
