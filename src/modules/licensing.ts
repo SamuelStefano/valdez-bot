@@ -77,6 +77,22 @@ export const PLANS: Record<Plan, PlanLimits> = {
   },
 };
 
+// O gratuito não é um plano que alguém assina: é o que sobra quando não há
+// licença ativa. Guardar como limite em vez de linha no banco evita migração,
+// CHECK novo no Supabase e um plano fantasma no cálculo de MRR.
+// 30s é escolhido pra frustrar na hora certa — a pérola boa quase sempre precisa
+// do contexto de antes, e é exatamente essa falta que vende o Básico.
+export const FREE_LIMITS: PlanLimits = {
+  label: 'Grátis',
+  priceCents: 0,
+  bufferSeconds: 30,
+  maxClipSeconds: 30,
+  replay: false,
+  clipsChannel: false,
+  stats: false,
+  support: 'site',
+};
+
 export const SUPPORT_LABEL: Record<SupportChannel, string> = {
   site: 'Ticket pelo site',
   discord: 'Direto no Discord',
@@ -216,7 +232,10 @@ export function isActive(guildId: string): boolean {
   return true;
 }
 
+// Ponto único de degradação: sem licença ativa o servidor cai no gratuito em vez
+// de perder o bot. Todo consumidor de limites herda isso de graça.
 export function limits(guildId: string): PlanLimits {
+  if (!isActive(guildId)) return FREE_LIMITS;
   return PLANS[getLicense(guildId).plan];
 }
 

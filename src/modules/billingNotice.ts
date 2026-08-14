@@ -25,7 +25,8 @@ export async function announceExpired(client: Client, guildId: string): Promise<
     .setColor(0x99aab5)
     .setTitle(license.plan === 'trial' ? '⏳ Seu teste acabou' : '⏳ Assinatura vencida')
     .setDescription(
-      'Parei de entrar na call e de guardar áudio. Nada seu foi perdido — é só reativar que volto na hora.'
+      'Continuo na call, mas agora só seguro os **últimos 30 segundos**. Dá pra salvar a risada, ' +
+        'não dá pra salvar a história que veio antes dela. Nada seu foi perdido — reativando, volto ao normal na hora.'
     )
     .addFields(
       { name: PLANS.basic.label, value: 'R$ 10/mês — buffer de 1min30', inline: true },

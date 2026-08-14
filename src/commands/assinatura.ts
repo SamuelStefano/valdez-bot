@@ -31,13 +31,15 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
   const statusLine =
     license.status !== 'active'
-      ? '⚠️ **Vencido** — o bot não entra mais na call.'
+      ? '⚠️ **Vencido** — rodando no gratuito, com 30s de buffer.'
       : restam === null
         ? '✅ Ativo'
         : `✅ Ativo — restam **${restam} dia(s)**`;
 
   const embed = new EmbedBuilder()
     .setColor(license.status === 'active' ? 0x57f287 : 0xed4245)
+    // plan já vem do limits(), que devolve o gratuito quando não há licença ativa
+    // — o título mostra o que o servidor tem agora, não o que ele já teve.
     .setTitle(`Plano: ${plan.label}${license.founder ? ' • Fundador' : ''}`)
     .setDescription(statusLine)
     .addFields(

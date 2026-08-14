@@ -108,13 +108,11 @@ function countHumans(client: Client, guildId: string): number {
 export function evaluatePresence(client: Client, guildId: string): void {
   if (!isConfigured(guildId) || !isPresenceEnabled(guildId)) return;
 
-  // Licença vencida: sai da call e não volta. O aviso é uma vez por vencimento,
-  // não a cada avaliação de presença.
-  if (!isActive(guildId)) {
-    if (isConnected(guildId)) void leaveChannel(client, guildId);
-    void announceExpired(client, guildId);
-    return;
-  }
+  // Licença vencida não tira mais o bot da call: ele continua no gratuito, com
+  // 30s de buffer. Bot que some é bot que o dono remove do servidor, e aí não
+  // sobra nada pra vender. O aviso é uma vez por vencimento, não a cada
+  // avaliação de presença.
+  if (!isActive(guildId)) void announceExpired(client, guildId);
 
   const humans = countHumans(client, guildId);
   if (humans > 0 && !isConnected(guildId)) {
@@ -172,10 +170,6 @@ export function startVoiceWatchdog(client: Client): void {
   watchdogInterval = setInterval(() => {
     for (const guildId of client.guilds.cache.keys()) {
       if (!isConfigured(guildId) || !isPresenceEnabled(guildId)) continue;
-      if (!isActive(guildId)) {
-        if (isConnected(guildId)) void leaveChannel(client, guildId);
-        continue;
-      }
 
       const humans = countHumans(client, guildId);
       if (humans === 0) {
