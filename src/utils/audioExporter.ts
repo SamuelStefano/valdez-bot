@@ -8,7 +8,13 @@ import { logger } from './logger';
 const SAMPLE_RATE = 48000;
 const CHANNELS = 2;
 const FRAME_MS = 20;
-const OPUS_BITRATE_KBPS = 48;
+
+// MP3 mono porque o arquivo é feito pra ser baixado e ouvido fora do Discord —
+// Opus/OGG não abre em quase nada no celular. Os bitrates são candidatos: o
+// export escolhe o melhor que ainda cabe no limite de anexo do servidor, e é
+// isso que mantém clip de 30 min possível sem Nitro.
+const MP3_BITRATES_KBPS = [96, 80, 64, 48, 40];
+const MIN_BITRATE_KBPS = MP3_BITRATES_KBPS[MP3_BITRATES_KBPS.length - 1];
 
 const RECORDINGS_DIR = path.join(process.cwd(), 'recordings');
 
@@ -37,24 +43,33 @@ export function maxUploadBytes(premiumTier: number): number {
   return UPLOAD_LIMIT_BY_TIER[premiumTier] ?? UPLOAD_LIMIT_BY_TIER[0];
 }
 
-// 5% de folga pro overhead do container OGG.
-export function estimatedBytes(seconds: number): number {
-  return Math.ceil(((OPUS_BITRATE_KBPS * 1000) / 8) * seconds * 1.05);
+// 5% de folga pro overhead de container e tags.
+export function estimatedBytes(seconds: number, kbps: number = MIN_BITRATE_KBPS): number {
+  return Math.ceil(((kbps * 1000) / 8) * seconds * 1.05);
 }
 
 export function maxClipSeconds(limitBytes: number): number {
   return Math.floor(limitBytes / estimatedBytes(1));
 }
 
+function pickBitrate(seconds: number, limitBytes: number): number {
+  return (
+    MP3_BITRATES_KBPS.find((kbps) => estimatedBytes(seconds, kbps) <= limitBytes) ?? MIN_BITRATE_KBPS
+  );
+}
+
 /**
- * Decode Opus packets to raw PCM, then re-encode to Opus/OGG via ffmpeg.
+ * Decode Opus packets to raw PCM, then re-encode to MP3 via ffmpeg.
  * Discord sends 48kHz stereo Opus at 20ms frames (960 samples per channel).
  */
 export async function exportClip(
   packets: Map<string, OpusPacket[]>,
-  filename: string
+  filename: string,
+  seconds: number,
+  limitBytes: number
 ): Promise<string> {
-  const outputPath = path.join(RECORDINGS_DIR, `${filename}.ogg`);
+  const outputPath = path.join(RECORDINGS_DIR, `${filename}.mp3`);
+  const bitrate = pickBitrate(seconds, limitBytes);
 
   const allPackets: OpusPacket[] = [];
   for (const userPackets of packets.values()) allPackets.push(...userPackets);
@@ -71,9 +86,6 @@ export async function exportClip(
   const pcmBuffer = mixToPcm(packets, allPackets);
   logger.info(`Exporting mixed audio to ${outputPath} (${pcmBuffer.length} bytes PCM)`);
 
-  // Opus mono ~48kbps em vez de MP3 192k estéreo: a voz já chega do Discord em
-  // Opus 48kHz, e 15 min de MP3 dava ~21MB — acima do limite de anexo de 10MB
-  // da maioria dos servidores, então o clip longo simplesmente falhava no envio.
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
       ffmpeg.kill('SIGKILL');
@@ -87,9 +99,8 @@ export async function exportClip(
       '-ac', '2',             // Stereo in (mixer output)
       '-i', 'pipe:0',         // Read from stdin
       '-ac', '1',             // Downmix to mono
-      '-c:a', 'libopus',
-      '-b:a', `${OPUS_BITRATE_KBPS}k`,
-      '-application', 'audio',
+      '-c:a', 'libmp3lame',
+      '-b:a', `${bitrate}k`,
       outputPath,
     ]);
 
@@ -207,8 +218,8 @@ function mixToPcm(
 // Um anexo de áudio sozinho aparece como uma barrinha cinza no feed. A waveform
 // é o que faz alguém parar de rolar e clicar no clip.
 export async function exportWaveform(audioPath: string): Promise<string | null> {
-  if (!audioPath.endsWith('.ogg')) return null;
-  const outputPath = audioPath.replace(/\.ogg$/, '.png');
+  if (!audioPath.endsWith('.mp3')) return null;
+  const outputPath = audioPath.replace(/\.mp3$/, '.png');
 
   return new Promise((resolve) => {
     const ffmpeg = spawn('ffmpeg', [

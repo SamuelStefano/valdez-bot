@@ -1,5 +1,5 @@
 import { ChatInputCommandInteraction, EmbedBuilder, SlashCommandBuilder } from 'discord.js';
-import { PLANS, getLicense, limits, daysLeft, founderSlotsLeft } from '../modules/licensing';
+import { PLANS, SUPPORT_LABEL, getLicense, limits, daysLeft, founderSlotsLeft } from '../modules/licensing';
 import { formatLabel } from '../modules/clipPublisher';
 import { config } from '../config';
 
@@ -39,21 +39,22 @@ export async function execute(interaction: ChatInputCommandInteraction) {
           `• Clip de até **${formatLabel(plan.maxClipSeconds)}**`,
           `• Gravação contínua: ${plan.replay ? 'sim' : 'não'}`,
           `• Canal de clipes dedicado: ${plan.clipsChannel ? 'sim' : 'não'}`,
+          `• Suporte: **${SUPPORT_LABEL[plan.support]}**`,
         ].join('\n'),
       },
       {
         name: `${PLANS.basic.label} — R$ 10/mês`,
-        value: 'Buffer de 5 min, clip de até 2 min.',
+        value: 'Clip de 1min30, MP3 pra baixar. Suporte por ticket no site.',
         inline: true,
       },
       {
         name: `${PLANS.pro.label} — R$ 30/mês`,
-        value: 'Buffer de 15 min, gravação contínua, canal de clipes.',
+        value: 'Clip de 15 min, gravação contínua, contador na call. Suporte no Discord.',
         inline: true,
       },
       {
         name: `${PLANS.max.label} — R$ 50/mês`,
-        value: 'Buffer de 30 min e clip de 30 min.',
+        value: 'Clip de 30 min. Suporte no WhatsApp.',
         inline: true,
       }
     );

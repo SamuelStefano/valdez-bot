@@ -56,10 +56,12 @@ export async function publishClip(
   const label = formatLabel(seconds);
   const filename = `${kind}_${interaction.guildId}_${Date.now()}`;
 
+  const limit = maxUploadBytes(Number(interaction.guild?.premiumTier ?? 0));
+
   let filePath: string;
   let wavePath: string | null = null;
   try {
-    filePath = await exportClip(packets, filename);
+    filePath = await exportClip(packets, filename, seconds, limit);
   } catch (err: any) {
     logger.error(`[CLIP] ${interaction.guildId}: export falhou: ${err?.message}`);
     await interaction.editReply('❌ Não consegui exportar o áudio. Tenta de novo em alguns segundos.');
@@ -68,7 +70,6 @@ export async function publishClip(
 
   try {
     const size = fs.statSync(filePath).size;
-    const limit = maxUploadBytes(Number(interaction.guild?.premiumTier ?? 0));
     if (size > limit) {
       const capMin = Math.floor(clipSecondsCap(interaction) / 60);
       await interaction.editReply(
@@ -78,7 +79,7 @@ export async function publishClip(
       return;
     }
 
-    const attachment = new AttachmentBuilder(filePath, { name: `${kind}-${label.replace(/\s/g, '')}.ogg` });
+    const attachment = new AttachmentBuilder(filePath, { name: `${kind}-${label.replace(/\s/g, '')}.mp3` });
     const files: AttachmentBuilder[] = [attachment];
 
     wavePath = await exportWaveform(filePath);

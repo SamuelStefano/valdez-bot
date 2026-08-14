@@ -7,8 +7,9 @@ import {
 } from 'discord.js';
 import { getSettings, saveSettings, optOutCount } from '../modules/guildSettings';
 import { evaluatePresence, leaveChannel, isConnected } from '../modules/voiceManager';
-import { limits, upsell, getLicense, daysLeft } from '../modules/licensing';
+import { limits, upsell, getLicense, daysLeft, SUPPORT_LABEL } from '../modules/licensing';
 import { stopLiveCounter } from '../modules/liveCounter';
+import { formatLabel } from '../modules/clipPublisher';
 
 export const data = new SlashCommandBuilder()
   .setName('config')
@@ -125,7 +126,6 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   const plan = limits(guildId);
   const license = getLicense(guildId);
   const restam = daysLeft(license);
-  const minutes = Math.round(plan.bufferSeconds / 60);
   const missing = missingPermissions(interaction);
   const embed = new EmbedBuilder()
     .setColor(0x5865f2)
@@ -142,8 +142,9 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       { name: 'Presença automática', value: settings.autoJoin ? '🟢 ativa' : '⚪ desativada', inline: true },
       { name: 'Contador na call', value: settings.liveCounter ? '🟢 ligado' : '⚪ desligado', inline: true },
       { name: 'Na call agora', value: isConnected(guildId) ? 'sim' : 'não', inline: true },
-      { name: 'Buffer', value: `últimos ${minutes} min`, inline: true },
+      { name: 'Buffer', value: `últimos ${formatLabel(plan.bufferSeconds)}`, inline: true },
       { name: 'Opt-outs', value: `${optOutCount(guildId)} membro(s)`, inline: true },
+      { name: 'Suporte', value: SUPPORT_LABEL[plan.support], inline: true },
       {
         name: 'Plano',
         value:

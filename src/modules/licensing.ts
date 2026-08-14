@@ -4,6 +4,8 @@ import { logger } from '../utils/logger';
 export type Plan = 'trial' | 'basic' | 'pro' | 'max';
 export type LicenseStatus = 'active' | 'expired' | 'canceled';
 
+export type SupportChannel = 'site' | 'discord' | 'whatsapp';
+
 export interface PlanLimits {
   label: string;
   priceCents: number;
@@ -12,28 +14,33 @@ export interface PlanLimits {
   replay: boolean;
   clipsChannel: boolean;
   stats: boolean;
+  support: SupportChannel;
 }
 
 // Os limites são o produto: o que separa um plano do outro é quanto tempo de
 // call o bot segura na memória e se dá pra gravar contínuo.
+// O teste é uma cópia do Pro de propósito: quem provou o plano do meio não
+// aceita descer pro básico depois.
 export const PLANS: Record<Plan, PlanLimits> = {
   trial: {
-    label: 'Teste (14 dias)',
+    label: 'Teste do Pro (3 dias)',
     priceCents: 0,
     bufferSeconds: 900,
     maxClipSeconds: 900,
     replay: true,
     clipsChannel: true,
     stats: true,
+    support: 'discord',
   },
   basic: {
     label: 'Básico',
     priceCents: 1000,
-    bufferSeconds: 300,
-    maxClipSeconds: 120,
+    bufferSeconds: 90,
+    maxClipSeconds: 90,
     replay: false,
     clipsChannel: false,
     stats: false,
+    support: 'site',
   },
   pro: {
     label: 'Pro',
@@ -43,6 +50,7 @@ export const PLANS: Record<Plan, PlanLimits> = {
     replay: true,
     clipsChannel: true,
     stats: true,
+    support: 'discord',
   },
   max: {
     label: 'Máximo',
@@ -52,10 +60,17 @@ export const PLANS: Record<Plan, PlanLimits> = {
     replay: true,
     clipsChannel: true,
     stats: true,
+    support: 'whatsapp',
   },
 };
 
-export const TRIAL_DAYS = 14;
+export const SUPPORT_LABEL: Record<SupportChannel, string> = {
+  site: 'Ticket pelo site',
+  discord: 'Direto no Discord',
+  whatsapp: 'WhatsApp',
+};
+
+export const TRIAL_DAYS = 3;
 export const FOUNDER_SLOTS = 100;
 
 export interface License {

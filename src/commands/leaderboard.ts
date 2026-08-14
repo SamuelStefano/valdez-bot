@@ -1,6 +1,7 @@
 import { ChatInputCommandInteraction, SlashCommandBuilder, EmbedBuilder } from 'discord.js';
 import { dbStatements } from '../utils/database';
 import { formatDuration } from '../modules/voiceTracker';
+import { progressFor } from '../modules/xp';
 
 export const data = new SlashCommandBuilder()
   .setName('leaderboard')
@@ -38,9 +39,12 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   }
 
   const medals = ['🥇', '🥈', '🥉'];
+  // No ranking do mês a soma é parcial, então o nível dali não seria o nível
+  // real do usuário — só mostra no acumulado.
   const lines = rows.map((row, i) => {
     const prefix = medals[i] || `**${i + 1}.**`;
-    return `${prefix} **${row.username}** — ${formatDuration(row.total_seconds)}`;
+    const level = period === 'month' ? '' : ` \`nv ${progressFor(row.total_seconds).level}\``;
+    return `${prefix} **${row.username}** — ${formatDuration(row.total_seconds)}${level}`;
   });
 
   const embed = new EmbedBuilder()

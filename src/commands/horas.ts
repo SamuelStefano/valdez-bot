@@ -1,6 +1,7 @@
 import { ChatInputCommandInteraction, SlashCommandBuilder, EmbedBuilder } from 'discord.js';
 import { dbStatements } from '../utils/database';
 import { formatDuration, getActiveSession } from '../modules/voiceTracker';
+import { progressFor, progressBar } from '../modules/xp';
 
 export const data = new SlashCommandBuilder()
   .setName('horas')
@@ -44,12 +45,21 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     totalSeconds += Math.floor(Date.now() / 1000) - activeJoinedAt;
   }
 
+  // O nível é sempre do acumulado: cair de nível na virada do mês seria punir
+  // quem joga há mais tempo.
+  const lifetime = (dbStatements.getUserTime.get(targetUser.id, guildId) as any)?.total_seconds || 0;
+  const progress = progressFor(lifetime + (activeJoinedAt ? Math.floor(Date.now() / 1000) - activeJoinedAt : 0));
+
   const embed = new EmbedBuilder()
     .setColor(0x5865f2)
     .setTitle(`🎧 Horas em Call`)
     .setDescription(
       `**${targetUser.displayName}** ficou **${formatDuration(totalSeconds)}** em call${period === 'month' ? ' este mês' : ' no total'}.`
     )
+    .addFields({
+      name: `Nível ${progress.level}`,
+      value: `\`${progressBar(progress)}\` ${progress.xp} XP\nFaltam **${progress.toNext} XP** pro nível ${progress.level + 1}.`,
+    })
     .setThumbnail(targetUser.displayAvatarURL())
     .setTimestamp();
 
