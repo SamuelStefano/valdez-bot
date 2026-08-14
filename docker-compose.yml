@@ -9,6 +9,10 @@ services:
       - ./data:/app/data
     working_dir: /app
     environment:
+      # O ranking semanal zera na "segunda-feira" do relógio do processo. Em UTC
+      # isso caía 21h de domingo no Brasil, cortando a disputa no meio do fim de
+      # semana, que é justamente quando o pessoal fica em call.
+      TZ: America/Sao_Paulo
       VALDEZ_DB_PATH: /app/data/valdez.db
       YT_COOKIES_PATH: /app/data/youtube-cookies.txt
       HEALTH_PORT: 3000

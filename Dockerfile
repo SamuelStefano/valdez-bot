@@ -6,6 +6,7 @@ RUN apt-get update && apt-get install -y \
   curl \
   ca-certificates \
   build-essential \
+  tzdata \
   && curl -L https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/latest/download/yt-dlp \
        -o /usr/local/bin/yt-dlp \
   && chmod +x /usr/local/bin/yt-dlp \
