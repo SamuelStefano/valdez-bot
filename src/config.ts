@@ -7,12 +7,14 @@ function required(key: string): string {
   return value;
 }
 
+// GUILD_ID/VOICE_CHANNEL_ID viraram semente do servidor de origem: o bot agora
+// atende qualquer servidor e cada um configura o seu por /config.
 export const config = {
   token: required('DISCORD_TOKEN'),
-  guildId: required('GUILD_ID'),
-  voiceChannelId: required('VOICE_CHANNEL_ID'),
   clientId: required('CLIENT_ID'),
-  logChannelId: process.env.LOG_CHANNEL_ID || null,
+  seedGuildId: process.env.GUILD_ID || null,
+  seedVoiceChannelId: process.env.VOICE_CHANNEL_ID || null,
+  seedClipsChannelId: process.env.LOG_CHANNEL_ID || null,
   replayBufferSeconds: 900, // 15 minutes — buffer capacity (max clip duration)
   defaultClipSeconds: 120, // default duration for /replay clip
   startLookbackSeconds: 120, // lookback at /replay start

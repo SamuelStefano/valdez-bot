@@ -1,6 +1,7 @@
 import { ChatInputCommandInteraction, SlashCommandBuilder, EmbedBuilder } from 'discord.js';
 import { addTracks } from '../modules/musicPlayer';
 import { setMusicChannel } from '../modules/musicModal';
+import { isConfigured } from '../modules/guildSettings';
 
 export const data = new SlashCommandBuilder()
   .setName('play')
@@ -11,7 +12,20 @@ export const data = new SlashCommandBuilder()
 
 export async function execute(interaction: ChatInputCommandInteraction) {
   const query = interaction.options.getString('musica', true);
-  const guildId = interaction.guildId!;
+  const guildId = interaction.guildId;
+
+  if (!guildId) {
+    await interaction.reply({ content: '❌ Use este comando dentro de um servidor.', ephemeral: true });
+    return;
+  }
+
+  if (!isConfigured(guildId)) {
+    await interaction.reply({
+      content: '⚠️ Nenhum canal de voz configurado. Um admin precisa rodar `/config canal` antes.',
+      ephemeral: true,
+    });
+    return;
+  }
 
   if (interaction.channelId) {
     await setMusicChannel(guildId, interaction.channelId);

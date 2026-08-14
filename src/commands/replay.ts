@@ -1,59 +1,55 @@
-import { ChatInputCommandInteraction, SlashCommandBuilder, AttachmentBuilder, TextChannel } from 'discord.js';
-import { getBufferSnapshot, startRecording, stopRecording, getActiveRecordings } from '../modules/replayBuffer';
-import { exportToMp3 } from '../utils/audioExporter';
+import { ChatInputCommandInteraction, SlashCommandBuilder } from 'discord.js';
+import { startRecording, stopRecording, getActiveRecordings, isBuffering } from '../modules/replayBuffer';
+import { publishClip, formatLabel } from '../modules/clipPublisher';
 import { config } from '../config';
-import fs from 'fs';
-import path from 'path';
 
 export const data = new SlashCommandBuilder()
   .setName('replay')
-  .setDescription('Grava os últimos 2 minutos + continua gravando até parar')
-  .addSubcommand(sub =>
+  .setDescription('Grava a partir de agora (com os últimos 2 min já inclusos) até você mandar parar')
+  .setDMPermission(false)
+  .addSubcommand((sub) =>
     sub.setName('start').setDescription('Começa a gravar (salva os últimos 2 min + continua)')
   )
-  .addSubcommand(sub =>
-    sub.setName('stop').setDescription('Para a gravação e envia o áudio')
-  )
-  .addSubcommand(sub =>
-    sub.setName('clip')
-      .setDescription('Salva os últimos N minutos como clip')
-      .addIntegerOption(opt =>
-        opt.setName('duracao')
-          .setDescription('Quanto tempo voltar (default 2min)')
-          .addChoices(
-            { name: '30 segundos', value: 30 },
-            { name: '1 minuto', value: 60 },
-            { name: '2 minutos', value: 120 },
-            { name: '5 minutos', value: 300 },
-            { name: '10 minutos', value: 600 },
-            { name: '15 minutos', value: 900 },
-          )
-      )
-  );
-
-async function getClipsChannel(interaction: ChatInputCommandInteraction): Promise<TextChannel | null> {
-  if (!config.logChannelId) return null;
-  const channel = interaction.client.channels.cache.get(config.logChannelId);
-  if (channel && channel.isTextBased()) return channel as TextChannel;
-  return null;
-}
+  .addSubcommand((sub) => sub.setName('stop').setDescription('Para a gravação e envia o áudio'));
 
 export async function execute(interaction: ChatInputCommandInteraction) {
+  const guildId = interaction.guildId;
+  if (!guildId) {
+    await interaction.reply({ content: '❌ Use este comando dentro de um servidor.', ephemeral: true });
+    return;
+  }
+
   const sub = interaction.options.getSubcommand();
 
   if (sub === 'start') {
-    const active = getActiveRecordings();
-    if (active.size > 0) {
-      await interaction.reply({ content: '⚠️ Já tem uma gravação em andamento. Use `/replay stop` para parar.', ephemeral: true });
+    if (!isBuffering(guildId)) {
+      await interaction.reply({
+        content: '⚠️ Não estou capturando áudio agora. Entro na call quando tiver gente — veja `/config status`.',
+        ephemeral: true,
+      });
       return;
     }
 
-    const sessionId = startRecording(interaction.user.id);
-    await interaction.reply(`🔴 **Gravando!** Os últimos 2 minutos foram salvos no buffer.\nUse \`/replay stop\` para parar e receber o áudio.\n\n*Session: ${sessionId}*`);
+    if (getActiveRecordings(guildId).size > 0) {
+      await interaction.reply({
+        content: '⚠️ Já tem uma gravação em andamento. Use `/replay stop` para parar.',
+        ephemeral: true,
+      });
+      return;
+    }
+
+    startRecording(guildId, interaction.user.id);
+    const lookback = formatLabel(config.startLookbackSeconds);
+    const cap = Math.round(config.maxRecordingSeconds / 60);
+    await interaction.reply(
+      `🔴 **Gravando** — os últimos ${lookback} já entraram.\n` +
+        `Use \`/replay stop\` para receber o áudio. Guardo no máximo os últimos ${cap} min.`
+    );
+    return;
   }
 
   if (sub === 'stop') {
-    const active = getActiveRecordings();
+    const active = getActiveRecordings(guildId);
     if (active.size === 0) {
       await interaction.reply({ content: '⚠️ Nenhuma gravação em andamento.', ephemeral: true });
       return;
@@ -62,68 +58,15 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     await interaction.deferReply();
 
     const sessionId = active.keys().next().value!;
-    const packets = stopRecording(sessionId);
+    const startedAt = active.get(sessionId)!.startedAt;
+    const packets = stopRecording(guildId, sessionId);
 
     if (!packets || packets.size === 0) {
-      await interaction.editReply('❌ Sem áudio capturado.');
+      await interaction.editReply('❌ Sem áudio capturado — ninguém falou nesse intervalo.');
       return;
     }
 
-    try {
-      const filename = `replay_${Date.now()}`;
-      const filePath = await exportToMp3(packets, filename);
-      const attachment = new AttachmentBuilder(filePath, { name: path.basename(filePath) });
-
-      // Send to clips channel
-      const clipsChannel = await getClipsChannel(interaction);
-      if (clipsChannel) {
-        await clipsChannel.send({
-          content: `🔴 **Replay** por **${interaction.user.displayName}**`,
-          files: [attachment],
-        });
-        await interaction.editReply(`✅ **Gravação enviada para <#${config.logChannelId}>!**`);
-      } else {
-        await interaction.editReply({ content: '✅ **Gravação salva!**', files: [attachment] });
-      }
-
-      setTimeout(() => { try { fs.unlinkSync(filePath); } catch {} }, 30_000);
-    } catch (err: any) {
-      await interaction.editReply(`❌ Erro ao exportar áudio: ${err.message}`);
-    }
-  }
-
-  if (sub === 'clip') {
-    await interaction.deferReply();
-
-    const durationSec = interaction.options.getInteger('duracao') ?? config.defaultClipSeconds;
-    const label = durationSec < 60 ? `${durationSec}s` : `${Math.round(durationSec / 60)}min`;
-
-    const snapshot = getBufferSnapshot(durationSec);
-    if (snapshot.size === 0) {
-      await interaction.editReply(`❌ Buffer vazio — ninguém falou nos últimos ${label}.`);
-      return;
-    }
-
-    try {
-      const filename = `clip_${Date.now()}`;
-      const filePath = await exportToMp3(snapshot, filename);
-      const attachment = new AttachmentBuilder(filePath, { name: path.basename(filePath) });
-
-      // Send to clips channel
-      const clipsChannel = await getClipsChannel(interaction);
-      if (clipsChannel) {
-        await clipsChannel.send({
-          content: `🎬 **Clip ${label}** por **${interaction.user.displayName}**`,
-          files: [attachment],
-        });
-        await interaction.editReply(`🎬 **Clip de ${label} enviado para <#${config.logChannelId}>!**`);
-      } else {
-        await interaction.editReply({ content: `🎬 **Clip dos últimos ${label}!**`, files: [attachment] });
-      }
-
-      setTimeout(() => { try { fs.unlinkSync(filePath); } catch {} }, 30_000);
-    } catch (err: any) {
-      await interaction.editReply(`❌ Erro ao exportar clip: ${err.message}`);
-    }
+    const seconds = Math.round((Date.now() - startedAt) / 1000) + config.startLookbackSeconds;
+    await publishClip(interaction, { packets, seconds, kind: 'replay' });
   }
 }

@@ -4,8 +4,15 @@ setDefaultResultOrder('ipv4first');
 import { Client, GatewayIntentBits, ChatInputCommandInteraction, REST, Routes } from 'discord.js';
 import { config } from './config';
 import { logger } from './utils/logger';
-import { setupAutoPresence, evaluatePresence, startVoiceWatchdog } from './modules/voiceManager';
+import {
+  setupAutoPresence,
+  evaluateAllGuilds,
+  startVoiceWatchdog,
+  dropGuildVoice,
+} from './modules/voiceManager';
 import { setupVoiceTracker } from './modules/voiceTracker';
+import { loadAllSettings, forgetGuild } from './modules/guildSettings';
+import { sendOnboarding } from './modules/onboarding';
 import { initMusicModal, handleMusicButton } from './modules/musicModal';
 import { logSpotifyStatus } from './utils/spotifyApi';
 import { startHealthServer, startHeartbeat } from './utils/health';
@@ -14,27 +21,36 @@ import * as ping from './commands/ping';
 import * as horas from './commands/horas';
 import * as leaderboard from './commands/leaderboard';
 import * as replay from './commands/replay';
+import * as clip from './commands/clip';
 import * as playCmd from './commands/play';
 import * as music from './commands/music';
 import * as call from './commands/call';
+import * as configCmd from './commands/config';
+import * as privacidade from './commands/privacidade';
 
 const commands = new Map<string, { execute: (i: ChatInputCommandInteraction) => Promise<void> }>();
 commands.set('ping', ping);
 commands.set('horas', horas);
 commands.set('leaderboard', leaderboard);
 commands.set('replay', replay);
+commands.set('clip', clip);
 commands.set('play', playCmd);
 commands.set('music', music);
 commands.set('call', call);
+commands.set('config', configCmd);
+commands.set('privacidade', privacidade);
 
 const allCommandsData = [
   ping.data.toJSON(),
   horas.data.toJSON(),
   leaderboard.data.toJSON(),
   replay.data.toJSON(),
+  clip.data.toJSON(),
   playCmd.data.toJSON(),
   music.data.toJSON(),
   call.data.toJSON(),
+  configCmd.data.toJSON(),
+  privacidade.data.toJSON(),
 ];
 
 const client = new Client({
@@ -62,14 +78,12 @@ client.once('ready', async () => {
   logger.info(`Valdez online como ${client.user?.tag}`);
 
   logSpotifyStatus();
+  loadAllSettings();
 
   try {
     const rest = new REST({ version: '10' }).setToken(config.token);
-    await rest.put(
-      Routes.applicationGuildCommands(config.clientId, config.guildId),
-      { body: allCommandsData }
-    );
-    logger.info('Slash commands registered');
+    await rest.put(Routes.applicationCommands(config.clientId), { body: allCommandsData });
+    logger.info(`Slash commands registered globally (${client.guilds.cache.size} servidores)`);
   } catch (err) {
     logger.error('Failed to register slash commands', err);
   }
@@ -78,8 +92,21 @@ client.once('ready', async () => {
   setupAutoPresence(client);
   initMusicModal(client);
   startHeartbeat(client);
-  evaluatePresence(client);
+  evaluateAllGuilds(client);
   startVoiceWatchdog(client);
+});
+
+client.on('guildCreate', async (guild) => {
+  logger.info(`[GUILD] entrei em ${guild.name} (${guild.id})`);
+  await sendOnboarding(guild);
+});
+
+// Removeram o bot: solta conexão, buffer e configuração em vez de manter estado
+// de um servidor que não existe mais pra ele.
+client.on('guildDelete', (guild) => {
+  logger.info(`[GUILD] removido de ${guild.name} (${guild.id})`);
+  dropGuildVoice(guild.id);
+  forgetGuild(guild.id);
 });
 
 client.on('interactionCreate', async (interaction) => {

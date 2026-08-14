@@ -7,15 +7,23 @@ import {
   getVoiceConnection,
 } from '@discordjs/voice';
 import { Client, ChannelType, VoiceState } from 'discord.js';
-import { config } from '../config';
 import { logger } from '../utils/logger';
-import { startBuffering, resetBuffering, getLastActivityAt } from './replayBuffer';
+import { startBuffering, resetBuffering, getLastActivityAt, dropGuild } from './replayBuffer';
+import { getSettings, saveSettings, isConfigured } from './guildSettings';
+import { showRecordingIndicator, clearRecordingIndicator, announceBuffering } from './consent';
 
-let connection: VoiceConnection | null = null;
-let reconnectTimeout: NodeJS.Timeout | null = null;
-let autoJoinEnabled = true;
+// Estado de voz por servidor. Antes eram variáveis de módulo: com dois
+// servidores, o segundo join sobrescrevia a conexão do primeiro.
+interface GuildVoice {
+  connection: VoiceConnection | null;
+  reconnectTimeout: NodeJS.Timeout | null;
+  musicActive: boolean;
+  announced: boolean;
+}
+
+const voices = new Map<string, GuildVoice>();
 let watchdogInterval: NodeJS.Timeout | null = null;
-let musicActive = false;
+let listenersBound = false;
 
 const WATCHDOG_TICK_MS = 60_000;
 // Force a rejoin if we are connected with people present but no audio has
@@ -23,72 +31,121 @@ const WATCHDOG_TICK_MS = 60_000;
 // Generous so ordinary quiet stretches don't churn the connection.
 const AUDIO_STALE_MS = 12 * 60_000;
 
+function state(guildId: string): GuildVoice {
+  let v = voices.get(guildId);
+  if (!v) {
+    v = { connection: null, reconnectTimeout: null, musicActive: false, announced: false };
+    voices.set(guildId, v);
+  }
+  return v;
+}
+
 // While the bot is playing music it is actively transmitting, which proves the
 // connection is alive and must not be torn down — silence on the receive side
 // is expected (listeners are quiet), so the watchdog leaves it alone.
-export function setMusicActive(active: boolean): void {
-  musicActive = active;
+export function setMusicActive(guildId: string, active: boolean): void {
+  state(guildId).musicActive = active;
 }
 
-export function getConnection(): VoiceConnection | null {
-  return connection;
+export function getConnection(guildId: string): VoiceConnection | null {
+  return voices.get(guildId)?.connection ?? null;
 }
 
-export function isPresenceEnabled(): boolean {
-  return autoJoinEnabled;
+export function listConnections(): [string, VoiceConnection][] {
+  const out: [string, VoiceConnection][] = [];
+  for (const [guildId, v] of voices) if (v.connection) out.push([guildId, v.connection]);
+  return out;
 }
 
-export function isConnected(): boolean {
-  return !!connection && connection.state.status !== VoiceConnectionStatus.Destroyed;
+export function isPresenceEnabled(guildId: string): boolean {
+  return getSettings(guildId).autoJoin;
 }
 
-export async function setPresence(client: Client, enabled: boolean): Promise<void> {
-  autoJoinEnabled = enabled;
+export function isConnected(guildId: string): boolean {
+  const c = voices.get(guildId)?.connection;
+  return !!c && c.state.status !== VoiceConnectionStatus.Destroyed;
+}
+
+export async function setPresence(client: Client, guildId: string, enabled: boolean): Promise<void> {
+  saveSettings({ guildId, autoJoin: enabled });
   if (enabled) {
-    evaluatePresence(client);
+    evaluatePresence(client, guildId);
   } else {
-    leaveChannel();
+    await leaveChannel(client, guildId);
   }
 }
 
-export function leaveChannel(): void {
-  if (reconnectTimeout) {
-    clearTimeout(reconnectTimeout);
-    reconnectTimeout = null;
+export async function leaveChannel(client: Client, guildId: string): Promise<void> {
+  const v = state(guildId);
+  if (v.reconnectTimeout) {
+    clearTimeout(v.reconnectTimeout);
+    v.reconnectTimeout = null;
   }
-  if (connection) {
-    connection.removeAllListeners();
-    connection.destroy();
-    connection = null;
+  if (v.connection) {
+    v.connection.removeAllListeners();
+    v.connection.destroy();
+    v.connection = null;
   }
-  resetBuffering();
-  logger.info('[VOICE] Left channel');
+  resetBuffering(guildId);
+  v.announced = false;
+  await clearRecordingIndicator(client, guildId);
+  logger.info(`[VOICE] ${guildId}: left channel`);
 }
 
-function countHumans(client: Client): number {
-  const guild = client.guilds.cache.get(config.guildId);
-  const channel = guild?.channels.cache.get(config.voiceChannelId);
+function countHumans(client: Client, guildId: string): number {
+  const channelId = getSettings(guildId).voiceChannelId;
+  if (!channelId) return 0;
+  const channel = client.guilds.cache.get(guildId)?.channels.cache.get(channelId);
   if (!channel || !channel.isVoiceBased()) return 0;
-  return channel.members.filter(m => !m.user.bot).size;
+  return channel.members.filter((m) => !m.user.bot).size;
 }
 
 // Join when there are humans in the channel, leave when it empties.
-export function evaluatePresence(client: Client): void {
-  if (!autoJoinEnabled) return;
-  const humans = countHumans(client);
-  if (humans > 0 && !isConnected()) {
-    joinChannel(client);
-  } else if (humans === 0 && isConnected()) {
-    logger.info('[VOICE] Channel empty — leaving');
-    leaveChannel();
+export function evaluatePresence(client: Client, guildId: string): void {
+  if (!isConfigured(guildId) || !isPresenceEnabled(guildId)) return;
+  const humans = countHumans(client, guildId);
+  if (humans > 0 && !isConnected(guildId)) {
+    joinChannel(client, guildId);
+  } else if (humans === 0 && isConnected(guildId)) {
+    logger.info(`[VOICE] ${guildId}: channel empty — leaving`);
+    void leaveChannel(client, guildId);
   }
 }
 
+export function evaluateAllGuilds(client: Client): void {
+  for (const guildId of client.guilds.cache.keys()) evaluatePresence(client, guildId);
+}
+
 export function setupAutoPresence(client: Client): void {
+  if (listenersBound) return;
+  listenersBound = true;
+
   client.on('voiceStateUpdate', (oldState: VoiceState, newState: VoiceState) => {
+    const guildId = newState.guild.id;
+
+    // Bot movido pra outro canal → volta pro canal configurado.
+    if (newState.member?.id === client.user?.id) {
+      const target = getSettings(guildId).voiceChannelId;
+      const v = voices.get(guildId);
+      if (target && newState.channelId && newState.channelId !== target && v?.connection) {
+        logger.info(`[VOICE] ${guildId}: bot moved to ${newState.channelId}, rejoining target`);
+        v.connection.rejoin({ channelId: target, selfDeaf: false, selfMute: true });
+      }
+      if (oldState.channelId && !newState.channelId) {
+        logger.info(`[VOICE] ${guildId}: bot left channel (voiceStateUpdate)`);
+        if (!v?.connection || v.connection.state.status === VoiceConnectionStatus.Destroyed) {
+          scheduleReconnect(client, guildId, 5_000);
+        }
+      }
+      return;
+    }
+
     if (oldState.member?.user.bot || newState.member?.user.bot) return;
-    if (oldState.channelId !== config.voiceChannelId && newState.channelId !== config.voiceChannelId) return;
-    evaluatePresence(client);
+
+    const target = getSettings(guildId).voiceChannelId;
+    if (!target) return;
+    if (oldState.channelId !== target && newState.channelId !== target) return;
+    evaluatePresence(client, guildId);
   });
 }
 
@@ -99,50 +156,56 @@ export function setupAutoPresence(client: Client): void {
 export function startVoiceWatchdog(client: Client): void {
   if (watchdogInterval) return;
   watchdogInterval = setInterval(() => {
-    if (!autoJoinEnabled) return;
+    for (const guildId of client.guilds.cache.keys()) {
+      if (!isConfigured(guildId) || !isPresenceEnabled(guildId)) continue;
 
-    const humans = countHumans(client);
-    if (humans === 0) {
-      if (isConnected()) {
-        logger.info('[VOICE] Watchdog: channel empty — leaving');
-        leaveChannel();
+      const humans = countHumans(client, guildId);
+      if (humans === 0) {
+        if (isConnected(guildId)) {
+          logger.info(`[VOICE] ${guildId}: watchdog — channel empty, leaving`);
+          void leaveChannel(client, guildId);
+        }
+        continue;
       }
-      return;
-    }
 
-    if (!isConnected()) {
-      logger.info('[VOICE] Watchdog: humans present but not connected — joining');
-      joinChannel(client);
-      return;
-    }
+      if (!isConnected(guildId)) {
+        logger.info(`[VOICE] ${guildId}: watchdog — humans present, joining`);
+        void joinChannel(client, guildId);
+        continue;
+      }
 
-    if (musicActive) return; // transmitting proves liveness; never cut playback
-    const last = getLastActivityAt();
-    if (last === 0) return; // buffering not yet (re)started — nothing to judge
-    const idleMs = Date.now() - last;
-    if (idleMs > AUDIO_STALE_MS) {
-      logger.warn(`[VOICE] Watchdog: no audio for ${Math.round(idleMs / 1000)}s with ${humans} present — forcing rejoin`);
-      leaveChannel();
-      joinChannel(client);
+      if (voices.get(guildId)?.musicActive) continue; // transmitting proves liveness
+      const last = getLastActivityAt(guildId);
+      if (last === 0) continue; // buffering not yet (re)started — nothing to judge
+      const idleMs = Date.now() - last;
+      if (idleMs > AUDIO_STALE_MS) {
+        logger.warn(
+          `[VOICE] ${guildId}: watchdog — no audio for ${Math.round(idleMs / 1000)}s with ${humans} present, forcing rejoin`
+        );
+        void leaveChannel(client, guildId).then(() => joinChannel(client, guildId));
+      }
     }
   }, WATCHDOG_TICK_MS);
 }
 
-export async function joinChannel(client: Client): Promise<void> {
-  if (!autoJoinEnabled) return;
+export async function joinChannel(client: Client, guildId: string): Promise<void> {
+  const settings = getSettings(guildId);
+  if (!settings.voiceChannelId || !settings.autoJoin) return;
+
+  const v = state(guildId);
 
   // Clean up any existing connection
-  const existing = getVoiceConnection(config.guildId);
+  const existing = getVoiceConnection(guildId);
   if (existing) {
     existing.removeAllListeners();
     existing.destroy();
-    resetBuffering();
-    await new Promise(r => setTimeout(r, 1000));
+    resetBuffering(guildId);
+    await new Promise((r) => setTimeout(r, 1000));
   }
 
-  const guild = client.guilds.cache.get(config.guildId);
+  const guild = client.guilds.cache.get(guildId);
   if (!guild) {
-    logger.error(`Guild ${config.guildId} not found`);
+    logger.error(`[VOICE] guild ${guildId} not found`);
     return;
   }
 
@@ -150,132 +213,132 @@ export async function joinChannel(client: Client): Promise<void> {
     await guild.channels.fetch();
   }
 
-  const channel = guild.channels.cache.get(config.voiceChannelId);
+  const channel = guild.channels.cache.get(settings.voiceChannelId);
   if (!channel || (channel.type !== ChannelType.GuildVoice && channel.type !== ChannelType.GuildStageVoice)) {
-    logger.error(`Voice channel ${config.voiceChannelId} not found`);
+    logger.error(`[VOICE] ${guildId}: voice channel ${settings.voiceChannelId} not found`);
     return;
   }
 
-  connection = joinVoiceChannel({
-    channelId: config.voiceChannelId,
-    guildId: config.guildId,
+  const connection = joinVoiceChannel({
+    channelId: settings.voiceChannelId,
+    guildId,
     adapterCreator: guild.voiceAdapterCreator,
     selfDeaf: false,
     selfMute: true,
   });
+  v.connection = connection;
 
   // Correct disconnect handler from discord.js docs:
   // If it transitions to Signalling or Connecting within 5s, it's recovering.
   // Otherwise, force rejoin.
   connection.on(VoiceConnectionStatus.Disconnected, async (_old, newState: any) => {
-    if (!connection) return;
+    if (!v.connection) return;
     const reason = newState?.reason;
     const reasonName = VoiceConnectionDisconnectReason[reason] ?? reason ?? 'unknown';
     const closeCode = newState?.closeCode;
-    logger.warn(`[VOICE] Disconnected (reason=${reasonName}${closeCode !== undefined ? ` closeCode=${closeCode}` : ''})`);
+    logger.warn(
+      `[VOICE] ${guildId}: disconnected (reason=${reasonName}${closeCode !== undefined ? ` closeCode=${closeCode}` : ''})`
+    );
     try {
       await Promise.race([
         entersState(connection, VoiceConnectionStatus.Signalling, 5_000),
         entersState(connection, VoiceConnectionStatus.Connecting, 5_000),
       ]);
-      logger.info('[VOICE] Recovering from disconnect...');
+      logger.info(`[VOICE] ${guildId}: recovering from disconnect...`);
     } catch {
-      // Real disconnect — rejoin
-      logger.warn('[VOICE] Cannot recover — destroying and rejoining');
-      if (connection) {
-        connection.removeAllListeners();
-        connection.destroy();
-        connection = null;
+      logger.warn(`[VOICE] ${guildId}: cannot recover — destroying and rejoining`);
+      if (v.connection) {
+        v.connection.removeAllListeners();
+        v.connection.destroy();
+        v.connection = null;
       }
-      resetBuffering();
-      scheduleReconnect(client, 5_000);
+      resetBuffering(guildId);
+      scheduleReconnect(client, guildId, 5_000);
     }
   });
 
-  // When ready, start buffering
   connection.on(VoiceConnectionStatus.Ready, () => {
-    logger.info('[VOICE] Connected (ready)');
-    startBuffering(connection!);
+    logger.info(`[VOICE] ${guildId}: connected (ready)`);
+    void beginCapture(client, guildId, connection, settings.voiceChannelId!);
   });
 
-  // If destroyed externally
   connection.on('stateChange', (oldState, newState) => {
     if (newState.status === VoiceConnectionStatus.Destroyed && oldState.status !== VoiceConnectionStatus.Destroyed) {
-      logger.warn('[VOICE] Connection destroyed externally');
-      connection = null;
-      resetBuffering();
-      scheduleReconnect(client, 10_000);
+      logger.warn(`[VOICE] ${guildId}: connection destroyed externally`);
+      v.connection = null;
+      resetBuffering(guildId);
+      scheduleReconnect(client, guildId, 10_000);
     }
   });
 
   connection.on('error', (err) => {
-    logger.error(`Voice connection error: ${err.message}`);
+    logger.error(`[VOICE] ${guildId}: connection error: ${err.message}`);
   });
 
-  // Wait for Ready with timeout
   try {
     await entersState(connection, VoiceConnectionStatus.Ready, 60_000);
   } catch {
-    logger.error('[VOICE] Initial join timed out (60s)');
-    if (connection) {
-      connection.removeAllListeners();
-      connection.destroy();
-      connection = null;
+    logger.error(`[VOICE] ${guildId}: initial join timed out (60s)`);
+    if (v.connection) {
+      v.connection.removeAllListeners();
+      v.connection.destroy();
+      v.connection = null;
     }
-    scheduleReconnect(client, 30_000);
+    scheduleReconnect(client, guildId, 30_000);
+  }
+}
+
+// O buffer só liga depois que o indicador visível está no ar. Sem ele o bot
+// fica na call como ouvinte mudo e ninguém é capturado.
+async function beginCapture(
+  client: Client,
+  guildId: string,
+  connection: VoiceConnection,
+  voiceChannelId: string
+): Promise<void> {
+  const marked = await showRecordingIndicator(client, guildId);
+  if (!marked) {
+    logger.warn(`[VOICE] ${guildId}: sem indicador de gravação — buffer NÃO ligado`);
+    return;
   }
 
-  setupAntiMove(client);
+  startBuffering(guildId, connection);
+
+  const v = state(guildId);
+  if (!v.announced) {
+    v.announced = true;
+    await announceBuffering(client, guildId, voiceChannelId);
+  }
 }
 
-function setupAntiMove(client: Client) {
-  if ((client as any)._antiMoveSetup) return;
-  (client as any)._antiMoveSetup = true;
-
-  client.on('voiceStateUpdate', (oldState: VoiceState, newState: VoiceState) => {
-    if (newState.member?.id !== client.user?.id) return;
-
-    // Bot moved to wrong channel → rejoin target
-    if (newState.channelId && newState.channelId !== config.voiceChannelId) {
-      logger.info(`Bot moved to ${newState.channelId}, rejoining target channel`);
-      if (connection) {
-        connection.rejoin({
-          channelId: config.voiceChannelId,
-          selfDeaf: false,
-          selfMute: true,
-        });
-      }
-    }
-
-    // Bot fully disconnected (kicked)
-    if (oldState.channelId && !newState.channelId) {
-      logger.info('[VOICE] Bot left channel (voiceStateUpdate)');
-      if (!connection || connection.state.status === VoiceConnectionStatus.Destroyed) {
-        scheduleReconnect(client, 5_000);
-      }
-    }
-  });
-}
-
-function scheduleReconnect(client: Client, delay = 30_000) {
-  if (!autoJoinEnabled) return;
-  if (reconnectTimeout) clearTimeout(reconnectTimeout);
-  logger.info(`[VOICE] Scheduling reconnect in ${delay / 1000}s`);
-  reconnectTimeout = setTimeout(() => {
-    reconnectTimeout = null;
-    logger.info('[VOICE] Re-evaluating presence...');
-    evaluatePresence(client);
+function scheduleReconnect(client: Client, guildId: string, delay = 30_000) {
+  if (!isPresenceEnabled(guildId)) return;
+  const v = state(guildId);
+  if (v.reconnectTimeout) clearTimeout(v.reconnectTimeout);
+  logger.info(`[VOICE] ${guildId}: scheduling reconnect in ${delay / 1000}s`);
+  v.reconnectTimeout = setTimeout(() => {
+    v.reconnectTimeout = null;
+    evaluatePresence(client, guildId);
   }, delay);
 }
 
-export function unmute() {
-  if (connection) {
-    connection.rejoin({ ...connection.joinConfig, selfMute: false });
+export function dropGuildVoice(guildId: string): void {
+  const v = voices.get(guildId);
+  if (v?.reconnectTimeout) clearTimeout(v.reconnectTimeout);
+  if (v?.connection) {
+    v.connection.removeAllListeners();
+    v.connection.destroy();
   }
+  voices.delete(guildId);
+  dropGuild(guildId);
 }
 
-export function mute() {
-  if (connection) {
-    connection.rejoin({ ...connection.joinConfig, selfMute: true });
-  }
+export function unmute(guildId: string) {
+  const c = voices.get(guildId)?.connection;
+  if (c) c.rejoin({ ...c.joinConfig, selfMute: false });
+}
+
+export function mute(guildId: string) {
+  const c = voices.get(guildId)?.connection;
+  if (c) c.rejoin({ ...c.joinConfig, selfMute: true });
 }

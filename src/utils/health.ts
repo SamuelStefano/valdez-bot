@@ -1,7 +1,7 @@
 import http from 'http';
 import { Client } from 'discord.js';
 import { VoiceConnectionStatus } from '@discordjs/voice';
-import { getConnection } from '../modules/voiceManager';
+import { listConnections } from '../modules/voiceManager';
 import { logger } from './logger';
 
 const LIVE_VOICE = new Set<VoiceConnectionStatus>([
@@ -19,16 +19,20 @@ export function startHealthServer(client: Client, port = Number(process.env.HEAL
     }
 
     const gatewayReady = client.isReady();
-    const conn = getConnection();
-    const voiceStatus = conn ? conn.state.status : 'none';
-    const voiceLive = conn ? LIVE_VOICE.has(conn.state.status) : false;
+    const connections = listConnections();
+    const voices = connections.map(([guildId, conn]) => ({
+      guildId,
+      status: conn.state.status,
+      live: LIVE_VOICE.has(conn.state.status),
+    }));
 
     const body = JSON.stringify({
       ok: gatewayReady,
       gatewayReady,
       ping: Number.isFinite(client.ws.ping) ? client.ws.ping : null,
-      voiceStatus,
-      voiceLive,
+      guilds: client.guilds.cache.size,
+      voices,
+      voiceLive: voices.some((v) => v.live),
       uptime: process.uptime(),
     });
 

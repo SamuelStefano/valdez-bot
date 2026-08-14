@@ -259,8 +259,8 @@ async function playNext(guildId: string) {
 
   if (queue.tracks.length === 0) {
     queue.current = null;
-    setMusicActive(false);
-    mute();
+    setMusicActive(guildId, false);
+    mute(guildId);
     emit(guildId, 'stopped');
     return;
   }
@@ -272,15 +272,15 @@ async function playNext(guildId: string) {
     const stream = ytStream(track.url);
     const resource = createAudioResource(stream, { inputType: StreamType.Arbitrary });
 
-    unmute();
+    unmute(guildId);
 
-    const connection = getConnection();
+    const connection = getConnection(guildId);
     if (connection) {
       connection.subscribe(queue.player);
     }
 
     queue.player.play(resource);
-    setMusicActive(true);
+    setMusicActive(guildId, true);
     logger.info(`Now playing: ${track.title}`);
     emit(guildId, 'trackStart');
   } catch (err) {
@@ -318,7 +318,7 @@ export function stop(guildId: string) {
   queue.current = null;
   queue.loop = false;
   queue.player.stop();
-  mute();
+  mute(guildId);
   emit(guildId, 'stopped');
 }
 

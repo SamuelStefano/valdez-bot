@@ -2,7 +2,13 @@ import { Client, VoiceState } from 'discord.js';
 import { dbStatements } from '../utils/database';
 import { logger } from '../utils/logger';
 
-const activeSessions = new Map<string, number>(); // usrId -> joinedAt (unix seconds)
+// Chaveado por guild+user: o mesmo usuário pode estar em call de dois servidores
+// ao mesmo tempo, e chavear só por userId fundia as duas sessões.
+const activeSessions = new Map<string, number>(); // `${guildId}:${userId}` -> joinedAt (unix seconds)
+
+function sessionKey(guildId: string, userId: string) {
+  return `${guildId}:${userId}`;
+}
 
 export function setupVoiceTracker(client: Client) {
   // Close any stale sessions on startup
@@ -24,7 +30,7 @@ export function setupVoiceTracker(client: Client) {
     // User joined a voice channel
     if (!wasInChannel && isInChannel) {
       const joinedAt = Math.floor(Date.now() / 1000);
-      activeSessions.set(userId, joinedAt);
+      activeSessions.set(sessionKey(guildId, userId), joinedAt);
       dbStatements.startSession.run(userId, username, guildId, isInChannel, joinedAt);
       logger.info(`${username} joined voice channel`);
     }
@@ -33,7 +39,7 @@ export function setupVoiceTracker(client: Client) {
     if (wasInChannel && !isInChannel) {
       const leftAt = Math.floor(Date.now() / 1000);
       dbStatements.endSession.run(leftAt, leftAt, userId, guildId);
-      activeSessions.delete(userId);
+      activeSessions.delete(sessionKey(guildId, userId));
       logger.info(`${username} left voice channel`);
     }
 
@@ -43,7 +49,7 @@ export function setupVoiceTracker(client: Client) {
       // Close old session
       dbStatements.endSession.run(now, now, userId, guildId);
       // Start new session
-      activeSessions.set(userId, now);
+      activeSessions.set(sessionKey(guildId, userId), now);
       dbStatements.startSession.run(userId, username, guildId, isInChannel, now);
       logger.info(`${username} switched voice channel`);
     }
@@ -52,8 +58,8 @@ export function setupVoiceTracker(client: Client) {
   logger.info('Voice tracker initialized');
 }
 
-export function getActiveSession(userId: string): number | undefined {
-  return activeSessions.get(userId);
+export function getActiveSession(guildId: string, userId: string): number | undefined {
+  return activeSessions.get(sessionKey(guildId, userId));
 }
 
 export function formatDuration(totalSeconds: number): string {

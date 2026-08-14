@@ -8,6 +8,7 @@ import { logger } from './logger';
 const SAMPLE_RATE = 48000;
 const CHANNELS = 2;
 const FRAME_MS = 20;
+const OPUS_BITRATE_KBPS = 48;
 
 const RECORDINGS_DIR = path.join(process.cwd(), 'recordings');
 
@@ -23,15 +24,37 @@ try {
   logger.warn('opusscript not available — audio export will use raw fallback');
 }
 
+// Limite de anexo por servidor. O bot não tem Nitro: o que vale é o boost tier
+// do servidor onde ele posta. Boost 1 não aumenta nada.
+const UPLOAD_LIMIT_BY_TIER: Record<number, number> = {
+  0: 10 * 1024 * 1024,
+  1: 10 * 1024 * 1024,
+  2: 50 * 1024 * 1024,
+  3: 100 * 1024 * 1024,
+};
+
+export function maxUploadBytes(premiumTier: number): number {
+  return UPLOAD_LIMIT_BY_TIER[premiumTier] ?? UPLOAD_LIMIT_BY_TIER[0];
+}
+
+// 5% de folga pro overhead do container OGG.
+export function estimatedBytes(seconds: number): number {
+  return Math.ceil(((OPUS_BITRATE_KBPS * 1000) / 8) * seconds * 1.05);
+}
+
+export function maxClipSeconds(limitBytes: number): number {
+  return Math.floor(limitBytes / estimatedBytes(1));
+}
+
 /**
- * Decode Opus packets to raw PCM, then encode to MP3 via ffmpeg.
+ * Decode Opus packets to raw PCM, then re-encode to Opus/OGG via ffmpeg.
  * Discord sends 48kHz stereo Opus at 20ms frames (960 samples per channel).
  */
-export async function exportToMp3(
+export async function exportClip(
   packets: Map<string, OpusPacket[]>,
   filename: string
 ): Promise<string> {
-  const outputPath = path.join(RECORDINGS_DIR, `${filename}.mp3`);
+  const outputPath = path.join(RECORDINGS_DIR, `${filename}.ogg`);
 
   const allPackets: OpusPacket[] = [];
   for (const userPackets of packets.values()) allPackets.push(...userPackets);
@@ -48,7 +71,9 @@ export async function exportToMp3(
   const pcmBuffer = mixToPcm(packets, allPackets);
   logger.info(`Exporting mixed audio to ${outputPath} (${pcmBuffer.length} bytes PCM)`);
 
-  // Pipe raw PCM to ffmpeg → MP3
+  // Opus mono ~48kbps em vez de MP3 192k estéreo: a voz já chega do Discord em
+  // Opus 48kHz, e 15 min de MP3 dava ~21MB — acima do limite de anexo de 10MB
+  // da maioria dos servidores, então o clip longo simplesmente falhava no envio.
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
       ffmpeg.kill('SIGKILL');
@@ -59,10 +84,12 @@ export async function exportToMp3(
       '-y',
       '-f', 's16le',         // Raw PCM signed 16-bit little-endian
       '-ar', '48000',         // 48kHz sample rate
-      '-ac', '2',             // Stereo
+      '-ac', '2',             // Stereo in (mixer output)
       '-i', 'pipe:0',         // Read from stdin
-      '-c:a', 'libmp3lame',   // Output codec: MP3
-      '-b:a', '192k',         // Bitrate
+      '-ac', '1',             // Downmix to mono
+      '-c:a', 'libopus',
+      '-b:a', `${OPUS_BITRATE_KBPS}k`,
+      '-application', 'audio',
       outputPath,
     ]);
 

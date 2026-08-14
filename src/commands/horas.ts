@@ -39,7 +39,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   }
 
   // Add current session time if user is in call
-  const activeJoinedAt = getActiveSession(targetUser.id);
+  const activeJoinedAt = getActiveSession(guildId, targetUser.id);
   if (activeJoinedAt) {
     totalSeconds += Math.floor(Date.now() / 1000) - activeJoinedAt;
   }
