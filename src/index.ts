@@ -12,10 +12,14 @@ import {
 } from './modules/voiceManager';
 import { setupVoiceTracker } from './modules/voiceTracker';
 import { loadAllSettings, forgetGuild } from './modules/guildSettings';
+import { loadLicenses, getLicense, dropLicenseCache } from './modules/licensing';
+import { track } from './modules/telemetry';
+import { clearExpiredNotice } from './modules/billingNotice';
 import { sendOnboarding } from './modules/onboarding';
 import { initMusicModal, handleMusicButton } from './modules/musicModal';
 import { logSpotifyStatus } from './utils/spotifyApi';
 import { startHealthServer, startHeartbeat } from './utils/health';
+import { startSupabaseSync } from './modules/supabaseSync';
 
 import * as ping from './commands/ping';
 import * as horas from './commands/horas';
@@ -27,6 +31,8 @@ import * as music from './commands/music';
 import * as call from './commands/call';
 import * as configCmd from './commands/config';
 import * as privacidade from './commands/privacidade';
+import * as assinatura from './commands/assinatura';
+import * as feedback from './commands/feedback';
 
 const commands = new Map<string, { execute: (i: ChatInputCommandInteraction) => Promise<void> }>();
 commands.set('ping', ping);
@@ -39,6 +45,8 @@ commands.set('music', music);
 commands.set('call', call);
 commands.set('config', configCmd);
 commands.set('privacidade', privacidade);
+commands.set('assinatura', assinatura);
+commands.set('feedback', feedback);
 
 const allCommandsData = [
   ping.data.toJSON(),
@@ -51,6 +59,8 @@ const allCommandsData = [
   call.data.toJSON(),
   configCmd.data.toJSON(),
   privacidade.data.toJSON(),
+  assinatura.data.toJSON(),
+  feedback.data.toJSON(),
 ];
 
 const client = new Client({
@@ -79,6 +89,7 @@ client.once('ready', async () => {
 
   logSpotifyStatus();
   loadAllSettings();
+  loadLicenses();
 
   try {
     const rest = new REST({ version: '10' }).setToken(config.token);
@@ -101,10 +112,16 @@ client.once('ready', async () => {
   startHeartbeat(client);
   evaluateAllGuilds(client);
   startVoiceWatchdog(client);
+  startSupabaseSync(client);
 });
 
 client.on('guildCreate', async (guild) => {
   logger.info(`[GUILD] entrei em ${guild.name} (${guild.id})`);
+  // Ler a licença já cria o teste de 14 dias — o servidor novo nunca cai no bot
+  // sem plano nenhum.
+  const license = getLicense(guild.id);
+  clearExpiredNotice(guild.id);
+  track(guild.id, 'guild_join', { detail: license.plan });
   await sendOnboarding(guild);
 });
 
@@ -112,8 +129,11 @@ client.on('guildCreate', async (guild) => {
 // de um servidor que não existe mais pra ele.
 client.on('guildDelete', (guild) => {
   logger.info(`[GUILD] removido de ${guild.name} (${guild.id})`);
+  track(guild.id, 'guild_leave');
   dropGuildVoice(guild.id);
   forgetGuild(guild.id);
+  dropLicenseCache(guild.id);
+  clearExpiredNotice(guild.id);
 });
 
 client.on('interactionCreate', async (interaction) => {

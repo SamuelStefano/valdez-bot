@@ -11,6 +11,8 @@ import { logger } from '../utils/logger';
 import { startBuffering, resetBuffering, getLastActivityAt, dropGuild } from './replayBuffer';
 import { getSettings, saveSettings, isConfigured } from './guildSettings';
 import { showRecordingIndicator, clearRecordingIndicator, announceBuffering } from './consent';
+import { isActive } from './licensing';
+import { announceExpired } from './billingNotice';
 
 // Estado de voz por servidor. Antes eram variáveis de módulo: com dois
 // servidores, o segundo join sobrescrevia a conexão do primeiro.
@@ -103,6 +105,15 @@ function countHumans(client: Client, guildId: string): number {
 // Join when there are humans in the channel, leave when it empties.
 export function evaluatePresence(client: Client, guildId: string): void {
   if (!isConfigured(guildId) || !isPresenceEnabled(guildId)) return;
+
+  // Licença vencida: sai da call e não volta. O aviso é uma vez por vencimento,
+  // não a cada avaliação de presença.
+  if (!isActive(guildId)) {
+    if (isConnected(guildId)) void leaveChannel(client, guildId);
+    void announceExpired(client, guildId);
+    return;
+  }
+
   const humans = countHumans(client, guildId);
   if (humans > 0 && !isConnected(guildId)) {
     joinChannel(client, guildId);
@@ -158,6 +169,10 @@ export function startVoiceWatchdog(client: Client): void {
   watchdogInterval = setInterval(() => {
     for (const guildId of client.guilds.cache.keys()) {
       if (!isConfigured(guildId) || !isPresenceEnabled(guildId)) continue;
+      if (!isActive(guildId)) {
+        if (isConnected(guildId)) void leaveChannel(client, guildId);
+        continue;
+      }
 
       const humans = countHumans(client, guildId);
       if (humans === 0) {

@@ -2,6 +2,8 @@ import { ChatInputCommandInteraction, SlashCommandBuilder } from 'discord.js';
 import { getBufferSnapshot, isBuffering } from '../modules/replayBuffer';
 import { publishClip, clipSecondsCap, formatLabel } from '../modules/clipPublisher';
 import { hasOptedOut } from '../modules/guildSettings';
+import { limits } from '../modules/licensing';
+import { track } from '../modules/telemetry';
 import { config } from '../config';
 
 export const data = new SlashCommandBuilder()
@@ -39,8 +41,8 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   }
 
   const requested = interaction.options.getInteger('duracao') ?? config.defaultClipSeconds;
-  const cap = clipSecondsCap(interaction);
-  const seconds = Math.min(requested, cap);
+  const planCap = limits(guildId).maxClipSeconds;
+  const seconds = Math.min(requested, clipSecondsCap(interaction), planCap);
 
   await interaction.deferReply();
 
@@ -54,10 +56,13 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   }
 
   if (seconds < requested) {
-    await interaction.editReply(
-      `⚠️ Este servidor aceita anexos menores, então cortei para os últimos ${formatLabel(seconds)}. Gerando...`
-    );
+    const motivo =
+      planCap <= seconds
+        ? `seu plano vai até ${formatLabel(planCap)} — veja \`/assinatura\``
+        : 'este servidor aceita anexos menores';
+    await interaction.editReply(`⚠️ Cortei para os últimos ${formatLabel(seconds)} (${motivo}). Gerando...`);
   }
 
+  track(guildId, 'clip', { userId: interaction.user.id, seconds });
   await publishClip(interaction, { packets: snapshot, seconds, kind: 'clip' });
 }

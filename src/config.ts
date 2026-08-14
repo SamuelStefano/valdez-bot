@@ -19,6 +19,9 @@ export const config = {
   defaultClipSeconds: 120, // default duration for /replay clip
   startLookbackSeconds: 120, // lookback at /replay start
   maxRecordingSeconds: 900, // 15 minutes max recording
+  siteUrl: process.env.SITE_URL || null,
+  supabaseUrl: process.env.SUPABASE_URL || '',
+  supabaseServiceKey: process.env.SUPABASE_SERVICE_ROLE_KEY || '',
   spotify: {
     clientId: process.env.SPOTIFY_CLIENT_ID || '',
     clientSecret: process.env.SPOTIFY_CLIENT_SECRET || '',

@@ -7,7 +7,7 @@ import {
 } from 'discord.js';
 import { getSettings, saveSettings, optOutCount } from '../modules/guildSettings';
 import { evaluatePresence, leaveChannel, isConnected } from '../modules/voiceManager';
-import { config as appConfig } from '../config';
+import { limits, upsell, getLicense, daysLeft } from '../modules/licensing';
 
 export const data = new SlashCommandBuilder()
   .setName('config')
@@ -84,6 +84,10 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   }
 
   if (sub === 'clips') {
+    if (!limits(guildId).clipsChannel) {
+      await interaction.reply({ content: upsell('Canal de clipes dedicado'), ephemeral: true });
+      return;
+    }
     const channel = interaction.options.getChannel('texto', true);
     saveSettings({ guildId, clipsChannelId: channel.id });
     await interaction.reply({ content: `✅ Clips vão para <#${channel.id}>.`, ephemeral: true });
@@ -91,7 +95,10 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   }
 
   const settings = getSettings(guildId);
-  const minutes = Math.round(appConfig.replayBufferSeconds / 60);
+  const plan = limits(guildId);
+  const license = getLicense(guildId);
+  const restam = daysLeft(license);
+  const minutes = Math.round(plan.bufferSeconds / 60);
   const missing = missingPermissions(interaction);
   const embed = new EmbedBuilder()
     .setColor(0x5865f2)
@@ -109,6 +116,14 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       { name: 'Na call agora', value: isConnected(guildId) ? 'sim' : 'não', inline: true },
       { name: 'Buffer', value: `últimos ${minutes} min`, inline: true },
       { name: 'Opt-outs', value: `${optOutCount(guildId)} membro(s)`, inline: true },
+      {
+        name: 'Plano',
+        value:
+          license.status === 'active'
+            ? `${plan.label}${restam !== null ? ` — ${restam} dia(s)` : ''}`
+            : `⚠️ ${plan.label} vencido — \`/assinatura\``,
+        inline: true,
+      },
       {
         name: 'Permissões',
         value: missing.length === 0 ? '✅ tudo certo' : `⚠️ faltando: ${missing.join(', ')}`,

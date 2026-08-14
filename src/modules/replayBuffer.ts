@@ -2,6 +2,7 @@ import { VoiceConnection, EndBehaviorType, VoiceReceiver } from '@discordjs/voic
 import { config } from '../config';
 import { logger } from '../utils/logger';
 import { hasOptedOut } from './guildSettings';
+import { limits } from './licensing';
 
 interface OpusPacket {
   data: Buffer;
@@ -60,8 +61,10 @@ export function isBuffering(guildId: string): boolean {
   return !!guilds.get(guildId)?.receiver;
 }
 
-function windowMs() {
-  return config.replayBufferSeconds * 1000;
+// A janela é o próprio plano: guardar 30 min de call custa memória, então quem
+// paga mais guarda mais.
+function windowMs(guildId: string) {
+  return limits(guildId).bufferSeconds * 1000;
 }
 
 function trimPackets(packets: OpusPacket[], cutoff: number) {
@@ -82,7 +85,7 @@ export function startBuffering(guildId: string, connection: VoiceConnection) {
   // Without this, someone who spoke then went quiet keeps stale packets forever.
   g.trimInterval = setInterval(() => {
     const now = Date.now();
-    for (const buf of g.userBuffers.values()) trimPackets(buf.packets, now - windowMs());
+    for (const buf of g.userBuffers.values()) trimPackets(buf.packets, now - windowMs(guildId));
     const recCutoff = now - config.maxRecordingSeconds * 1000;
     for (const rec of g.activeRecordings.values()) {
       for (const packets of rec.extraPackets.values()) trimPackets(packets, recCutoff);
@@ -134,7 +137,7 @@ export function startBuffering(guildId: string, connection: VoiceConnection) {
       buf.packets.push(packet);
 
       // Trim buffer to keep only last N seconds
-      trimPackets(buf.packets, Date.now() - windowMs());
+      trimPackets(buf.packets, Date.now() - windowMs(guildId));
 
       // Active recordings — capped at maxRecordingSeconds so a forgotten
       // /replay start can't grow the buffer until the container OOMs.
@@ -162,7 +165,7 @@ export function startBuffering(guildId: string, connection: VoiceConnection) {
 
   receiver.speaking.on('start', g.speakingHandler);
 
-  logger.info(`[BUFFER] ${guildId}: replay buffer started — last ${config.replayBufferSeconds}s`);
+  logger.info(`[BUFFER] ${guildId}: replay buffer started — last ${limits(guildId).bufferSeconds}s`);
 }
 
 export function resetBuffering(guildId: string) {
@@ -208,7 +211,7 @@ export function getBufferSnapshot(guildId: string, durationSec?: number): Map<st
   const g = guilds.get(guildId);
   const requested = durationSec ?? config.defaultClipSeconds;
   // Cap at buffer capacity — can't snapshot more than we kept in memory.
-  const effective = Math.min(requested, config.replayBufferSeconds);
+  const effective = Math.min(requested, limits(guildId).bufferSeconds);
   const snapshot = new Map<string, OpusPacket[]>();
   if (!g) return snapshot;
 

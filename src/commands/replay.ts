@@ -1,6 +1,8 @@
 import { ChatInputCommandInteraction, SlashCommandBuilder } from 'discord.js';
 import { startRecording, stopRecording, getActiveRecordings, isBuffering } from '../modules/replayBuffer';
 import { publishClip, formatLabel } from '../modules/clipPublisher';
+import { limits, upsell } from '../modules/licensing';
+import { track } from '../modules/telemetry';
 import { config } from '../config';
 
 export const data = new SlashCommandBuilder()
@@ -20,6 +22,11 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   }
 
   const sub = interaction.options.getSubcommand();
+
+  if (!limits(guildId).replay) {
+    await interaction.reply({ content: upsell('Gravação contínua'), ephemeral: true });
+    return;
+  }
 
   if (sub === 'start') {
     if (!isBuffering(guildId)) {
@@ -67,6 +74,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     }
 
     const seconds = Math.round((Date.now() - startedAt) / 1000) + config.startLookbackSeconds;
+    track(guildId, 'replay', { userId: interaction.user.id, seconds });
     await publishClip(interaction, { packets, seconds, kind: 'replay' });
   }
 }

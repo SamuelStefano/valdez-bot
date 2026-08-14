@@ -39,6 +39,44 @@ db.exec(`
     created_at INTEGER NOT NULL,
     PRIMARY KEY (guild_id, user_id)
   );
+
+  CREATE TABLE IF NOT EXISTS licenses (
+    guild_id TEXT PRIMARY KEY,
+    plan TEXT NOT NULL DEFAULT 'trial',
+    status TEXT NOT NULL DEFAULT 'active',
+    founder INTEGER NOT NULL DEFAULT 0,
+    started_at INTEGER NOT NULL,
+    expires_at INTEGER,
+    updated_at INTEGER NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    user_id TEXT,
+    seconds INTEGER,
+    bytes INTEGER,
+    detail TEXT,
+    created_at INTEGER NOT NULL,
+    synced INTEGER NOT NULL DEFAULT 0
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_events_unsynced ON events(synced);
+
+  CREATE TABLE IF NOT EXISTS feedback (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id TEXT NOT NULL,
+    guild_name TEXT,
+    user_id TEXT NOT NULL,
+    username TEXT,
+    rating INTEGER,
+    message TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    synced INTEGER NOT NULL DEFAULT 0
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_feedback_unsynced ON feedback(synced);
 `);
 
 export const dbStatements: Record<string, Statement> = {
@@ -115,6 +153,47 @@ export const dbStatements: Record<string, Statement> = {
   removeOptOut: db.prepare(`DELETE FROM clip_optouts WHERE guild_id = ? AND user_id = ?`),
 
   listOptOuts: db.prepare(`SELECT user_id FROM clip_optouts WHERE guild_id = ?`),
+
+  getLicense: db.prepare(`SELECT * FROM licenses WHERE guild_id = ?`),
+
+  listLicenses: db.prepare(`SELECT * FROM licenses`),
+
+  upsertLicense: db.prepare(`
+    INSERT INTO licenses (guild_id, plan, status, founder, started_at, expires_at, updated_at)
+    VALUES (@guild_id, @plan, @status, @founder, @started_at, @expires_at, @updated_at)
+    ON CONFLICT(guild_id) DO UPDATE SET
+      plan = excluded.plan,
+      status = excluded.status,
+      founder = excluded.founder,
+      expires_at = excluded.expires_at,
+      updated_at = excluded.updated_at
+  `),
+
+  countFounders: db.prepare(`SELECT COUNT(*) as n FROM licenses WHERE founder = 1`),
+
+  addEvent: db.prepare(`
+    INSERT INTO events (guild_id, kind, user_id, seconds, bytes, detail, created_at)
+    VALUES (@guild_id, @kind, @user_id, @seconds, @bytes, @detail, @created_at)
+  `),
+
+  pendingEvents: db.prepare(`SELECT * FROM events WHERE synced = 0 ORDER BY id LIMIT ?`),
+
+  markEventsSynced: db.prepare(`UPDATE events SET synced = 1 WHERE id <= ? AND synced = 0`),
+
+  pruneEvents: db.prepare(`DELETE FROM events WHERE synced = 1 AND created_at < ?`),
+
+  addFeedback: db.prepare(`
+    INSERT INTO feedback (guild_id, guild_name, user_id, username, rating, message, created_at)
+    VALUES (@guild_id, @guild_name, @user_id, @username, @rating, @message, @created_at)
+  `),
+
+  pendingFeedback: db.prepare(`SELECT * FROM feedback WHERE synced = 0 ORDER BY id LIMIT ?`),
+
+  markFeedbackSynced: db.prepare(`UPDATE feedback SET synced = 1 WHERE id <= ? AND synced = 0`),
+
+  recentFeedbackByUser: db.prepare(`
+    SELECT COUNT(*) as n FROM feedback WHERE user_id = ? AND created_at > ?
+  `),
 };
 
 export { db };
