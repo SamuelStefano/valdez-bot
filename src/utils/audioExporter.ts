@@ -204,6 +204,37 @@ function mixToPcm(
   return out;
 }
 
+// Um anexo de áudio sozinho aparece como uma barrinha cinza no feed. A waveform
+// é o que faz alguém parar de rolar e clicar no clip.
+export async function exportWaveform(audioPath: string): Promise<string | null> {
+  if (!audioPath.endsWith('.ogg')) return null;
+  const outputPath = audioPath.replace(/\.ogg$/, '.png');
+
+  return new Promise((resolve) => {
+    const ffmpeg = spawn('ffmpeg', [
+      '-y',
+      '-i', audioPath,
+      '-filter_complex', 'aformat=channel_layouts=mono,showwavespic=s=1000x180:colors=#ff4d3d',
+      '-frames:v', '1',
+      outputPath,
+    ]);
+
+    const timeout = setTimeout(() => {
+      ffmpeg.kill('SIGKILL');
+      resolve(null);
+    }, 15_000);
+
+    ffmpeg.on('close', (code) => {
+      clearTimeout(timeout);
+      resolve(code === 0 && fs.existsSync(outputPath) ? outputPath : null);
+    });
+    ffmpeg.on('error', () => {
+      clearTimeout(timeout);
+      resolve(null);
+    });
+  });
+}
+
 /**
  * Fallback: save raw Opus packet data concatenated
  */

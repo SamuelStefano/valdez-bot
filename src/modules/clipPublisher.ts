@@ -7,7 +7,7 @@ import {
 import fs from 'fs';
 import { OpusPacket } from './replayBuffer';
 import { getSettings } from './guildSettings';
-import { exportClip, maxUploadBytes, maxClipSeconds } from '../utils/audioExporter';
+import { exportClip, exportWaveform, maxUploadBytes, maxClipSeconds } from '../utils/audioExporter';
 import { logger } from '../utils/logger';
 
 const CLIP_COLOR = 0xff4d4d;
@@ -57,6 +57,7 @@ export async function publishClip(
   const filename = `${kind}_${interaction.guildId}_${Date.now()}`;
 
   let filePath: string;
+  let wavePath: string | null = null;
   try {
     filePath = await exportClip(packets, filename);
   } catch (err: any) {
@@ -78,6 +79,12 @@ export async function publishClip(
     }
 
     const attachment = new AttachmentBuilder(filePath, { name: `${kind}-${label.replace(/\s/g, '')}.ogg` });
+    const files: AttachmentBuilder[] = [attachment];
+
+    wavePath = await exportWaveform(filePath);
+    if (wavePath) files.push(new AttachmentBuilder(wavePath, { name: 'waveform.png' }));
+
+    const voiceChannel = interaction.guild?.members.me?.voice.channel?.name;
     const embed = new EmbedBuilder()
       .setColor(CLIP_COLOR)
       .setAuthor({
@@ -87,23 +94,31 @@ export async function publishClip(
       .setTitle(kind === 'clip' ? `🎬 Clip • últimos ${label}` : `⏺️ Replay • ${label}`)
       .addFields(
         { name: 'Na call', value: participantsField(interaction, [...packets.keys()]), inline: false },
+        { name: 'Canal', value: voiceChannel ? `🔊 ${voiceChannel}` : '—', inline: true },
+        { name: 'Duração', value: label, inline: true },
         { name: 'Tamanho', value: `${(size / 1024 / 1024).toFixed(1)} MB`, inline: true }
       )
+      .setFooter({ text: 'Valdez • /clip' })
       .setTimestamp();
+
+    if (wavePath) embed.setImage('attachment://waveform.png');
 
     const clipsChannel = resolveClipsChannel(interaction);
     if (clipsChannel && clipsChannel.id !== interaction.channelId) {
-      await clipsChannel.send({ embeds: [embed], files: [attachment] });
+      await clipsChannel.send({ embeds: [embed], files });
       await interaction.editReply(`✅ Clip de ${label} postado em <#${clipsChannel.id}>.`);
     } else {
-      await interaction.editReply({ content: '', embeds: [embed], files: [attachment] });
+      await interaction.editReply({ content: '', embeds: [embed], files });
     }
   } finally {
+    const temps = wavePath ? [filePath, wavePath] : [filePath];
     setTimeout(() => {
-      try {
-        fs.unlinkSync(filePath);
-      } catch {
-        /* já removido */
+      for (const p of temps) {
+        try {
+          fs.unlinkSync(p);
+        } catch {
+          /* já removido */
+        }
       }
     }, 30_000);
   }
