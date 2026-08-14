@@ -80,21 +80,20 @@ segundo domínio para o público de fora.
 
 ## 2. Marketing
 
-### O bloqueio antes de tudo: não existe teste sem dono
+### O bloqueio que já foi resolvido: o nível gratuito
 
-Hoje o único jeito de experimentar o Valdez é o dono do servidor ativar o teste
-de 3 dias. Isso mata a descoberta orgânica: quem entra num diretório de bots
-clica em "Convidar", testa em segundos e decide. Se a primeira coisa que o bot
-faz é pedir assinatura, ele desinstala.
+Antes, quando o teste de 3 dias acabava, o bot saía da call e não voltava. Isso
+matava a descoberta orgânica: quem chega por um diretório clica em "Convidar",
+testa em segundos e decide. Bot que some do servidor é bot que o dono remove — e
+aí não sobra nada para vender depois.
 
-**Antes de listar em qualquer lugar, crie um nível gratuito de verdade.** A
-sugestão: buffer de 30 segundos, sem limite de tempo, sem cartão. É curto o
-bastante para o `/clip` frustrar exatamente na hora certa — a pérola boa quase
-sempre tem mais de 30 segundos de contexto — e isso é o argumento de venda. Um
-teste de 3 dias vende para quem já foi convencido; o gratuito é o que traz gente
-para ser convencida.
+**Já está no ar:** sem licença ativa o servidor cai no gratuito, com buffer de 30
+segundos, sem prazo e sem cartão. O bot continua na call. 30s é curto o bastante
+para o `/clip` frustrar na hora certa — a pérola boa quase sempre precisa do
+contexto que veio antes dela — e é exatamente essa falta que vende o Básico.
 
-Esse é o item de maior impacto desta lista inteira. Os outros dependem dele.
+O teste de 3 dias vende para quem já foi convencido; o gratuito é o que traz
+gente para ser convencida. Com isso resolvido, o resto da lista faz sentido.
 
 ### Diretórios de bots (verificados no ar)
 
@@ -134,7 +133,7 @@ depois de acontecer", é o canal de menor custo e maior teto que existe aqui. Pe
 autorização a quem aparece antes de postar.
 
 Ordem prática:
-1. Nível gratuito no ar.
+1. ~~Nível gratuito no ar.~~ feito
 2. Listar nos 5 diretórios.
 3. Um clipe por dia por 30 dias, com link do site na bio.
 4. Só então pensar em pagar tráfego.
