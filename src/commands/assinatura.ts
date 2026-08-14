@@ -1,5 +1,14 @@
 import { ChatInputCommandInteraction, EmbedBuilder, SlashCommandBuilder } from 'discord.js';
-import { PLANS, SUPPORT_LABEL, getLicense, limits, daysLeft, founderSlotsLeft } from '../modules/licensing';
+import {
+  PLANS,
+  SUPPORT_LABEL,
+  getLicense,
+  limits,
+  daysLeft,
+  founderSlotsLeft,
+  lifetimeSlotsLeft,
+  LIFETIME_SLOTS,
+} from '../modules/licensing';
 import { formatLabel } from '../modules/clipPublisher';
 import { config } from '../config';
 
@@ -56,6 +65,10 @@ export async function execute(interaction: ChatInputCommandInteraction) {
         name: `${PLANS.max.label} — R$ 50/mês`,
         value: 'Clip de 30 min. Suporte no WhatsApp.',
         inline: true,
+      },
+      {
+        name: `${PLANS.lifetime.label} — R$ 150 uma vez`,
+        value: `Tudo do Pro, sem mensalidade nunca mais. Restam **${lifetimeSlotsLeft()}** de ${LIFETIME_SLOTS} vagas.`,
       }
     );
 

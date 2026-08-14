@@ -191,6 +191,8 @@ export const dbStatements: Record<string, Statement> = {
 
   countFounders: db.prepare(`SELECT COUNT(*) as n FROM licenses WHERE founder = 1`),
 
+  countLifetime: db.prepare(`SELECT COUNT(*) as n FROM licenses WHERE plan = 'lifetime'`),
+
   addEvent: db.prepare(`
     INSERT INTO events (guild_id, kind, user_id, seconds, bytes, detail, created_at)
     VALUES (@guild_id, @kind, @user_id, @seconds, @bytes, @detail, @created_at)

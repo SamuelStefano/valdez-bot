@@ -24,7 +24,7 @@ create table if not exists valdez.licenses (
   external_ref text,
   note text,
   updated_at timestamptz not null default now(),
-  constraint licenses_plan_check check (plan in ('trial', 'basic', 'pro', 'max')),
+  constraint licenses_plan_check check (plan in ('trial', 'basic', 'pro', 'max', 'lifetime')),
   constraint licenses_status_check check (status in ('active', 'expired', 'canceled'))
 );
 

@@ -81,7 +81,10 @@ async function pushGuilds(client: Client): Promise<void> {
       guild_id: l.guildId,
       plan: l.plan,
       status: l.status,
-      price_cents: l.founder && l.plan !== 'trial' ? 1000 : PLANS[l.plan].priceCents,
+      // O preço de fundador congela a mensalidade, não o vitalício: R$ 150 já é
+      // pagamento único, aplicar o desconto ali seria vender o produto a R$ 10.
+      price_cents:
+        l.founder && l.plan !== 'trial' && l.plan !== 'lifetime' ? 1000 : PLANS[l.plan].priceCents,
       founder: l.founder,
       started_at: iso(l.startedAt),
       expires_at: iso(l.expiresAt),

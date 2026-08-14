@@ -46,9 +46,10 @@ export async function announceExpired(client: Client, guildId: string): Promise<
       'Parei de entrar na call e de guardar áudio. Nada seu foi perdido — é só reativar que volto na hora.'
     )
     .addFields(
-      { name: PLANS.basic.label, value: 'R$ 10/mês — buffer de 5 min', inline: true },
+      { name: PLANS.basic.label, value: 'R$ 10/mês — buffer de 1min30', inline: true },
       { name: PLANS.pro.label, value: 'R$ 30/mês — buffer de 15 min + gravação', inline: true },
-      { name: PLANS.max.label, value: 'R$ 50/mês — buffer de 30 min', inline: true }
+      { name: PLANS.max.label, value: 'R$ 50/mês — buffer de 30 min', inline: true },
+      { name: PLANS.lifetime.label, value: 'R$ 150 uma vez — tudo do Pro, sem mensalidade' }
     )
     .setFooter({
       text: slots > 0 ? `Restam ${slots} vagas de fundador a R$ 10 para sempre.` : 'Use /assinatura para reativar.',

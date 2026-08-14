@@ -1,7 +1,7 @@
 import { dbStatements } from '../utils/database';
 import { logger } from '../utils/logger';
 
-export type Plan = 'trial' | 'basic' | 'pro' | 'max';
+export type Plan = 'trial' | 'basic' | 'pro' | 'max' | 'lifetime';
 export type LicenseStatus = 'active' | 'expired' | 'canceled';
 
 export type SupportChannel = 'site' | 'discord' | 'whatsapp';
@@ -62,6 +62,19 @@ export const PLANS: Record<Plan, PlanLimits> = {
     stats: true,
     support: 'whatsapp',
   },
+  // Pagamento único: entrega o Pro, não o Máximo. R$ 150 já são cinco meses de
+  // Pro adiantados, e manter o topo fora do vitalício é o que impede o Máximo
+  // mensal de virar produto morto.
+  lifetime: {
+    label: 'Vitalício',
+    priceCents: 15000,
+    bufferSeconds: 900,
+    maxClipSeconds: 900,
+    replay: true,
+    clipsChannel: true,
+    stats: true,
+    support: 'discord',
+  },
 };
 
 export const SUPPORT_LABEL: Record<SupportChannel, string> = {
@@ -72,6 +85,9 @@ export const SUPPORT_LABEL: Record<SupportChannel, string> = {
 
 export const TRIAL_DAYS = 3;
 export const FOUNDER_SLOTS = 100;
+// Vitalício sem teto quebraria a receita recorrente: cada venda é caixa hoje e
+// custo pra sempre. 50 é o que dá pra bancar como oferta de largada.
+export const LIFETIME_SLOTS = 50;
 
 export interface License {
   guildId: string;
@@ -207,6 +223,11 @@ export function limits(guildId: string): PlanLimits {
 export function founderSlotsLeft(): number {
   const { n } = dbStatements.countFounders.get() as { n: number };
   return Math.max(0, FOUNDER_SLOTS - n);
+}
+
+export function lifetimeSlotsLeft(): number {
+  const { n } = dbStatements.countLifetime.get() as { n: number };
+  return Math.max(0, LIFETIME_SLOTS - n);
 }
 
 export function daysLeft(license: License): number | null {
