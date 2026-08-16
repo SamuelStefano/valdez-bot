@@ -1,7 +1,7 @@
 import { dbStatements } from '../utils/database';
 import { logger } from '../utils/logger';
 
-export type Plan = 'trial' | 'basic' | 'pro' | 'max' | 'lifetime';
+export type Plan = 'trial' | 'basic' | 'pro' | 'max' | 'lifetime' | 'owner';
 export type LicenseStatus = 'active' | 'expired' | 'canceled';
 
 export type SupportChannel = 'site' | 'discord' | 'whatsapp';
@@ -97,6 +97,24 @@ export const PLANS: Record<Plan, PlanLimits> = {
     isolatedClip: false,
     weeklyRecap: false,
     support: 'discord',
+  },
+  // O bot é meu: o meu servidor usa tudo e não paga nada. Antes ele era marcado
+  // como Máximo + fundador, e fundador congela a mensalidade em R$ 10 — então a
+  // minha própria call entrava no painel como assinatura ativa de R$ 10 e virava
+  // MRR. Plano próprio, de preço zero, é o que impede o dono de aparecer como
+  // cliente na métrica que decide se o negócio se paga.
+  owner: {
+    label: 'Dono',
+    priceCents: 0,
+    bufferSeconds: 1800,
+    maxClipSeconds: 1800,
+    music: 'playlist',
+    replay: true,
+    clipsChannel: true,
+    stats: true,
+    isolatedClip: true,
+    weeklyRecap: true,
+    support: 'whatsapp',
   },
 };
 
@@ -284,11 +302,14 @@ export function daysLeft(license: License): number | null {
 
 // O servidor de origem é meu: sem isso ele cairia no teste de 14 dias e o bot
 // sairia da call de casa por falta de pagamento.
+// `founder: false` é obrigatório — fundador é quem PAGOU R$ 10 nas 100 primeiras
+// vagas, e me marcar como um consumia uma vaga real: a landing anunciava 99
+// restantes antes de existir o primeiro cliente.
 export function ensureOwnerLicense(guildId: string): void {
   const license = getLicense(guildId);
-  if (license.plan === 'max' && license.status === 'active' && license.expiresAt === null) return;
-  saveLicense({ ...license, plan: 'max', status: 'active', founder: true, expiresAt: null });
-  logger.info(`[LICENSE] ${guildId}: licença vitalícia do dono aplicada`);
+  if (license.plan === 'owner' && license.status === 'active' && license.expiresAt === null) return;
+  saveLicense({ ...license, plan: 'owner', status: 'active', founder: false, expiresAt: null });
+  logger.info(`[LICENSE] ${guildId}: licença do dono aplicada`);
 }
 
 const UPSELL_LADDER: Plan[] = ['basic', 'pro', 'max'];
@@ -313,8 +334,11 @@ export function upsell(feature: string, minPlan: Plan = 'pro'): string {
 // exatamente o que foi prometido nas 100 primeiras vagas, então subir de plano
 // não pode custar mais caro pra quem entrou cedo. O vitalício fica de fora: R$
 // 150 já é pagamento único, aplicar o desconto ali venderia o produto a R$ 10.
+// `owner` fora do desconto junto do teste e do vitalício: o preço dele é zero e
+// aplicar o piso de fundador cobraria R$ 10 de mim mesmo — que foi exatamente o
+// bug que colocou a minha call no MRR.
 export function priceCents(plan: Plan, founder: boolean): number {
-  if (founder && plan !== 'trial' && plan !== 'lifetime') return FOUNDER_PRICE_CENTS;
+  if (founder && plan !== 'trial' && plan !== 'lifetime' && plan !== 'owner') return FOUNDER_PRICE_CENTS;
   return PLANS[plan].priceCents;
 }
 
@@ -330,13 +354,14 @@ export interface UpgradeQuote {
 // vira crédito e ele completa só a diferença pelos dias que faltam. Cobrar cheio
 // faria o dono esperar o vencimento — e nesse meio tempo ele desiste.
 // Devolve null quando não existe caminho de upgrade (mesmo plano, plano abaixo,
-// ou vitalício, que já pagou pra sempre).
+// vitalício, que já pagou pra sempre, ou o meu próprio servidor).
 export function quoteUpgrade(guildId: string, to: Plan): UpgradeQuote | null {
-  if (to === 'trial') return null;
+  if (to === 'trial' || to === 'owner') return null;
 
   const license = getLicense(guildId);
   const active = isActive(guildId);
   if (license.plan === 'lifetime' && active) return null;
+  if (license.plan === 'owner') return null;
 
   const fullCents = priceCents(to, license.founder);
   if (to === 'lifetime') return { to, fullCents, dueCents: fullCents, daysLeft: 0, keepsExpiry: false };
