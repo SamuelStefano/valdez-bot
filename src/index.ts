@@ -27,6 +27,7 @@ import { initMusicModal, handleMusicButton } from './modules/musicModal';
 import { logSpotifyStatus } from './utils/spotifyApi';
 import { startHealthServer, startHeartbeat } from './utils/health';
 import { startSupabaseSync } from './modules/supabaseSync';
+import { startWeeklyRecap } from './modules/weeklyRecap';
 
 import * as ping from './commands/ping';
 import * as horas from './commands/horas';
@@ -123,6 +124,7 @@ client.once('ready', async () => {
   evaluateAllGuilds(client);
   startVoiceWatchdog(client);
   startSupabaseSync(client);
+  startWeeklyRecap(client);
 });
 
 client.on('guildCreate', async (guild) => {

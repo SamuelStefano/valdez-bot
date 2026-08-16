@@ -1,7 +1,8 @@
 import { ChatInputCommandInteraction, SlashCommandBuilder, EmbedBuilder } from 'discord.js';
-import { addTracks } from '../modules/musicPlayer';
+import { addTracks, isCollection } from '../modules/musicPlayer';
 import { setMusicChannel } from '../modules/musicModal';
 import { isConfigured } from '../modules/guildSettings';
+import { limits, upsell } from '../modules/licensing';
 
 export const data = new SlashCommandBuilder()
   .setName('play')
@@ -22,6 +23,21 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   if (!isConfigured(guildId)) {
     await interaction.reply({
       content: '⚠️ Nenhum canal de voz configurado. Um admin precisa rodar `/config canal` antes.',
+      ephemeral: true,
+    });
+    return;
+  }
+
+  // O bloqueio é antes de resolver a URL: resolver uma playlist de 200 faixas pra
+  // depois recusar gasta a cota da API do Spotify e faz o usuário esperar por nada.
+  const music = limits(guildId).music;
+  if (music === 'none') {
+    await interaction.reply({ content: upsell('Música na call', 'basic'), ephemeral: true });
+    return;
+  }
+  if (music !== 'playlist' && isCollection(query)) {
+    await interaction.reply({
+      content: upsell('Playlist e álbum inteiros', 'pro') + '\nNo Básico dá pra pedir faixa por faixa.',
       ephemeral: true,
     });
     return;

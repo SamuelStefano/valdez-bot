@@ -75,6 +75,13 @@ function detectUrlType(input: string): UrlType {
   return 'search';
 }
 
+// Playlist e álbum entram numa faixa de plano diferente da faixa avulsa, e quem
+// decide isso é o comando — daí a detecção precisar ser pública.
+export function isCollection(input: string): boolean {
+  const t = detectUrlType(input);
+  return t === 'yt_playlist' || t === 'sp_playlist' || t === 'sp_album';
+}
+
 function getOrCreateQueue(guildId: string): GuildQueue {
   if (!queues.has(guildId)) {
     const player = createAudioPlayer({

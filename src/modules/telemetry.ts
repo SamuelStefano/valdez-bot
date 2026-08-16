@@ -12,7 +12,8 @@ export type EventKind =
   | 'license_expired'
   | 'export_error'
   | 'role_reward'
-  | 'recap';
+  | 'recap'
+  | 'weekly_recap';
 
 interface EventDetail {
   userId?: string;

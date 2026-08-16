@@ -9,8 +9,15 @@ import {
   lifetimeSlotsLeft,
   LIFETIME_SLOTS,
 } from '../modules/licensing';
+import type { MusicTier } from '../modules/licensing';
 import { formatLabel } from '../modules/clipPublisher';
 import { config } from '../config';
+
+const MUSIC_LABEL: Record<MusicTier, string> = {
+  none: 'não',
+  link: 'por link ou nome',
+  playlist: 'playlist e álbum inteiros',
+};
 
 export const data = new SlashCommandBuilder()
   .setName('assinatura')
@@ -48,25 +55,30 @@ export async function execute(interaction: ChatInputCommandInteraction) {
         value: [
           `• Buffer de **${formatLabel(plan.bufferSeconds)}**`,
           `• Clip de até **${formatLabel(plan.maxClipSeconds)}**`,
+          `• Música: **${MUSIC_LABEL[plan.music]}**`,
           `• Gravação contínua: ${plan.replay ? 'sim' : 'não'}`,
           `• Canal de clipes dedicado: ${plan.clipsChannel ? 'sim' : 'não'}`,
-          `• Cargos por nível + recap de fim de call: ${plan.stats ? 'sim' : 'não'}`,
+          `• Contador na call + cargos por nível + recap: ${plan.stats ? 'sim' : 'não'}`,
+          `• Clipe de uma voz só: ${plan.isolatedClip ? 'sim' : 'não'}`,
+          `• Retrospectiva semanal: ${plan.weeklyRecap ? 'sim' : 'não'}`,
           `• Suporte: **${SUPPORT_LABEL[plan.support]}**`,
         ].join('\n'),
       },
       {
         name: `${PLANS.basic.label} — R$ 10/mês`,
-        value: 'Clip de 1min30, MP3 pra baixar. Suporte por ticket no site.',
+        value: 'Clip de 1min30 e música por link. Suporte por ticket no site.',
         inline: true,
       },
       {
         name: `${PLANS.pro.label} — R$ 30/mês`,
-        value: 'Clip de 15 min, gravação contínua, contador na call, cargos por nível e recap de fim de call. Suporte no Discord.',
+        value:
+          'Clip de 15 min, gravação contínua, playlist inteira, contador ao vivo na call, cargos por nível e recap de fim de call. Suporte no Discord.',
         inline: true,
       },
       {
         name: `${PLANS.max.label} — R$ 50/mês`,
-        value: 'Clip de 30 min. Suporte no WhatsApp.',
+        value:
+          'Tudo do Pro, clip de 30 min, **clipe da voz de uma pessoa só** e retrospectiva semanal do servidor. Suporte no WhatsApp.',
         inline: true,
       },
       {

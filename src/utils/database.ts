@@ -142,6 +142,39 @@ export const dbStatements: Record<string, Statement> = {
     LIMIT 10
   `),
 
+  // A retrospectiva fecha uma semana inteira, então precisa de janela com fim —
+  // com `>= since` o recap de segunda somaria também as horas da manhã seguinte.
+  getLeaderboardBetween: db.prepare(`
+    SELECT user_id, username, SUM(duration_seconds) as total_seconds
+    FROM voice_sessions
+    WHERE guild_id = ? AND duration_seconds IS NOT NULL
+      AND joined_at >= ? AND joined_at < ?
+    GROUP BY user_id
+    ORDER BY total_seconds DESC
+    LIMIT 10
+  `),
+
+  weekTotals: db.prepare(`
+    SELECT COUNT(DISTINCT user_id) as people,
+           COUNT(*) as sessions,
+           COALESCE(SUM(duration_seconds), 0) as seconds
+    FROM voice_sessions
+    WHERE guild_id = ? AND duration_seconds IS NOT NULL
+      AND joined_at >= ? AND joined_at < ?
+  `),
+
+  countEventsSince: db.prepare(`
+    SELECT COUNT(*) as n FROM events
+    WHERE guild_id = ? AND kind = ? AND created_at >= ?
+  `),
+
+  weekEvents: db.prepare(`
+    SELECT kind, COUNT(*) as n
+    FROM events
+    WHERE guild_id = ? AND created_at >= ? AND created_at < ?
+    GROUP BY kind
+  `),
+
   sessionParticipants: db.prepare(`
     SELECT user_id, username, SUM(duration_seconds) as total_seconds,
            MIN(joined_at) as first_join, MAX(left_at) as last_left

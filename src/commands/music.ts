@@ -1,5 +1,6 @@
 import { ChatInputCommandInteraction, SlashCommandBuilder, EmbedBuilder } from 'discord.js';
 import { skip, stop, pause, resume, toggleLoop, getQueue, nowPlaying, previous } from '../modules/musicPlayer';
+import { limits, upsell } from '../modules/licensing';
 
 export const data = new SlashCommandBuilder()
   .setName('music')
@@ -16,6 +17,11 @@ export const data = new SlashCommandBuilder()
 export async function execute(interaction: ChatInputCommandInteraction) {
   const sub = interaction.options.getSubcommand();
   const guildId = interaction.guildId!;
+
+  if (limits(guildId).music === 'none') {
+    await interaction.reply({ content: upsell('Música na call', 'basic'), ephemeral: true });
+    return;
+  }
 
   switch (sub) {
     case 'skip': {

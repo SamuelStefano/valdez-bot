@@ -2,7 +2,7 @@ import { ChatInputCommandInteraction, SlashCommandBuilder } from 'discord.js';
 import { getBufferSnapshot, isBuffering } from '../modules/replayBuffer';
 import { publishClip, clipSecondsCap, formatLabel } from '../modules/clipPublisher';
 import { hasOptedOut } from '../modules/guildSettings';
-import { limits } from '../modules/licensing';
+import { limits, upsell } from '../modules/licensing';
 import { track } from '../modules/telemetry';
 import { config } from '../config';
 
@@ -22,6 +22,9 @@ export const data = new SlashCommandBuilder()
         { name: '10 minutos', value: 600 },
         { name: '15 minutos', value: 900 }
       )
+  )
+  .addUserOption((opt) =>
+    opt.setName('pessoa').setDescription('Só a voz dessa pessoa, sem o resto da call')
   );
 
 export async function execute(interaction: ChatInputCommandInteraction) {
@@ -40,13 +43,33 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     return;
   }
 
+  const plan = limits(guildId);
+  const only = interaction.options.getUser('pessoa');
+  if (only && !plan.isolatedClip) {
+    await interaction.reply({ content: upsell('Clipe de uma voz só', 'max'), ephemeral: true });
+    return;
+  }
+
   const requested = interaction.options.getInteger('duracao') ?? config.defaultClipSeconds;
-  const planCap = limits(guildId).maxClipSeconds;
+  const planCap = plan.maxClipSeconds;
   const seconds = Math.min(requested, clipSecondsCap(interaction), planCap);
 
   await interaction.deferReply();
 
-  const snapshot = getBufferSnapshot(guildId, seconds);
+  const full = getBufferSnapshot(guildId, seconds);
+  // O buffer já guarda os pacotes separados por pessoa: filtrar o Map antes de
+  // exportar entrega a faixa isolada sem tocar no mixer.
+  const snapshot = only
+    ? new Map([...full].filter(([userId]) => userId === only.id))
+    : full;
+
+  if (only && snapshot.size === 0) {
+    await interaction.editReply(
+      `❌ ${only.displayName} não falou nos últimos ${formatLabel(seconds)} — ou está em opt-out.`
+    );
+    return;
+  }
+
   if (snapshot.size === 0) {
     const extra = hasOptedOut(guildId, interaction.user.id)
       ? '\n*Você está em opt-out — sua voz não é capturada.*'

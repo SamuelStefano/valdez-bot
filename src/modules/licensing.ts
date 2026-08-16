@@ -6,19 +6,28 @@ export type LicenseStatus = 'active' | 'expired' | 'canceled';
 
 export type SupportChannel = 'site' | 'discord' | 'whatsapp';
 
+// Música é o degrau que faltava entre o Básico e o Pro: pedir uma faixa por link
+// resolve a call de amigos, montar fila de playlist é o que servidor grande usa.
+export type MusicTier = 'none' | 'link' | 'playlist';
+
 export interface PlanLimits {
   label: string;
   priceCents: number;
   bufferSeconds: number;
   maxClipSeconds: number;
+  music: MusicTier;
   replay: boolean;
   clipsChannel: boolean;
   stats: boolean;
+  isolatedClip: boolean;
+  weeklyRecap: boolean;
   support: SupportChannel;
 }
 
-// Os limites são o produto: o que separa um plano do outro é quanto tempo de
-// call o bot segura na memória e se dá pra gravar contínuo.
+// Os limites são o produto. Antes o único degrau real era a janela do buffer, e
+// quem olhava Básico e Pro lado a lado via o mesmo bot com um número diferente —
+// então escolhia pelo preço. Cada plano agora ganha ou perde um recurso que a
+// pessoa consegue nomear sem ler tabela.
 // O teste é uma cópia do Pro de propósito: quem provou o plano do meio não
 // aceita descer pro básico depois.
 export const PLANS: Record<Plan, PlanLimits> = {
@@ -27,9 +36,12 @@ export const PLANS: Record<Plan, PlanLimits> = {
     priceCents: 0,
     bufferSeconds: 900,
     maxClipSeconds: 900,
+    music: 'playlist',
     replay: true,
     clipsChannel: true,
     stats: true,
+    isolatedClip: false,
+    weeklyRecap: false,
     support: 'discord',
   },
   basic: {
@@ -37,9 +49,12 @@ export const PLANS: Record<Plan, PlanLimits> = {
     priceCents: 1000,
     bufferSeconds: 90,
     maxClipSeconds: 90,
+    music: 'link',
     replay: false,
     clipsChannel: false,
     stats: false,
+    isolatedClip: false,
+    weeklyRecap: false,
     support: 'site',
   },
   pro: {
@@ -47,9 +62,12 @@ export const PLANS: Record<Plan, PlanLimits> = {
     priceCents: 3000,
     bufferSeconds: 900,
     maxClipSeconds: 900,
+    music: 'playlist',
     replay: true,
     clipsChannel: true,
     stats: true,
+    isolatedClip: false,
+    weeklyRecap: false,
     support: 'discord',
   },
   max: {
@@ -57,22 +75,27 @@ export const PLANS: Record<Plan, PlanLimits> = {
     priceCents: 5000,
     bufferSeconds: 1800,
     maxClipSeconds: 1800,
+    music: 'playlist',
     replay: true,
     clipsChannel: true,
     stats: true,
+    isolatedClip: true,
+    weeklyRecap: true,
     support: 'whatsapp',
   },
-  // Pagamento único: entrega o Pro, não o Máximo. R$ 150 já são cinco meses de
-  // Pro adiantados, e manter o topo fora do vitalício é o que impede o Máximo
-  // mensal de virar produto morto.
+  // Pagamento único: entrega o Pro, não o Máximo. Manter o topo fora do vitalício
+  // é o que impede o Máximo mensal de virar produto morto.
   lifetime: {
     label: 'Vitalício',
     priceCents: 15000,
     bufferSeconds: 900,
     maxClipSeconds: 900,
+    music: 'playlist',
     replay: true,
     clipsChannel: true,
     stats: true,
+    isolatedClip: false,
+    weeklyRecap: false,
     support: 'discord',
   },
 };
@@ -87,9 +110,12 @@ export const FREE_LIMITS: PlanLimits = {
   priceCents: 0,
   bufferSeconds: 30,
   maxClipSeconds: 30,
+  music: 'none',
   replay: false,
   clipsChannel: false,
   stats: false,
+  isolatedClip: false,
+  weeklyRecap: false,
   support: 'site',
 };
 
@@ -263,13 +289,22 @@ export function ensureOwnerLicense(guildId: string): void {
   logger.info(`[LICENSE] ${guildId}: licença vitalícia do dono aplicada`);
 }
 
+const UPSELL_LADDER: Plan[] = ['basic', 'pro', 'max'];
+
+function brl(cents: number): string {
+  return `R$ ${Math.round(cents / 100)}`;
+}
+
 // Mensagem única de bloqueio: se cada comando escrevesse a sua, o dono do
-// servidor aprenderia um texto diferente por recurso.
-export function upsell(feature: string): string {
-  return (
-    `🔒 **${feature}** está no ${PLANS.pro.label} (R$ 30) e no ${PLANS.max.label} (R$ 50).\n` +
-    'Use `/assinatura` para ver os planos.'
-  );
+// servidor aprenderia um texto diferente por recurso. O plano mínimo é
+// argumento porque nem todo bloqueio vende o Pro — música por link começa no
+// Básico, e mandar quem quer ouvir uma faixa direto pro R$ 30 perde a venda.
+export function upsell(feature: string, minPlan: Plan = 'pro'): string {
+  const from = UPSELL_LADDER.indexOf(minPlan);
+  const names = UPSELL_LADDER.slice(from === -1 ? 1 : from)
+    .map((p) => `${PLANS[p].label} (${brl(PLANS[p].priceCents)})`)
+    .join(', ');
+  return `🔒 **${feature}** está no ${names}.\nUse \`/assinatura\` para ver os planos.`;
 }
 
 export function dropLicenseCache(guildId: string): void {
