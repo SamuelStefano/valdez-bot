@@ -17,11 +17,11 @@ vagar. Os livres, confirmados por WHOIS/RDAP oficial:
 | **`valdezbot.com.br`** | livre | **R$ 40** (Registro.br) |
 | `usevaldez.com` | livre | ~US$ 10,44 (Cloudflare Registrar, at-cost) |
 | `valdez.gg` | livre | ~US$ 51 (Spaceship) a US$ 100 (GoDaddy) |
-| `valdez.bot` | livre, mas **descartado** | US$ 50–100 |
+| `valdez.bot` | livre | ~US$ 52/ano |
 
-O `.bot` está fora: a Amazon Registry exige AWS account ID e um bot em framework
-aprovado (Lex, Dialogflow, Microsoft Bot Framework, Pandorabots). discord.js não
-entra nessa lista.
+O `.bot` deixou de ser restrito em nov/2023 — a Amazon Registry derrubou a
+exigência de AWS account ID e framework aprovado, então dá para registrar
+normalmente. Fica de fora por preço: US$ 52 todo ano contra R$ 40 do `.com.br`.
 
 O `.gg` é o TLD com cara de Discord, mas custa 5 a 10 vezes mais e some do
 orçamento de um produto que ainda não faturou.
