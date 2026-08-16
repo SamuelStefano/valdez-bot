@@ -67,6 +67,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
           `• Canal de clipes dedicado: ${plan.clipsChannel ? 'sim' : 'não'}`,
           `• Contador na call + cargos por nível + recap: ${plan.stats ? 'sim' : 'não'}`,
           `• Clipe de uma voz só: ${plan.isolatedClip ? 'sim' : 'não'}`,
+          `• Vídeo da sala: ${plan.roomVideo ? 'sim' : 'não'}`,
           `• Retrospectiva semanal: ${plan.weeklyRecap ? 'sim' : 'não'}`,
           `• Suporte: **${SUPPORT_LABEL[plan.support]}**`,
         ].join('\n'),
@@ -85,7 +86,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       {
         name: `${PLANS.max.label} — R$ 50/mês`,
         value:
-          'Tudo do Pro, clip de 30 min, **clipe da voz de uma pessoa só** e retrospectiva semanal do servidor. Suporte no WhatsApp.',
+          'Tudo do Pro, clip de 30 min, **vídeo da sala** com quem falou acendendo na hora, clipe da voz de uma pessoa só e retrospectiva semanal. Suporte no WhatsApp.',
         inline: true,
       },
       {

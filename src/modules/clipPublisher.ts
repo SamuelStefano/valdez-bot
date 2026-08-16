@@ -8,6 +8,7 @@ import fs from 'fs';
 import { OpusPacket } from './replayBuffer';
 import { getSettings } from './guildSettings';
 import { exportClip, exportWaveform, maxUploadBytes, maxClipSeconds } from '../utils/audioExporter';
+import { exportRoomVideo, renderBusy, MAX_VIDEO_SECONDS, Participant } from '../utils/videoExporter';
 import { logger } from '../utils/logger';
 
 const CLIP_COLOR = 0xff4d4d;
@@ -43,15 +44,40 @@ function resolveClipsChannel(interaction: ChatInputCommandInteraction): TextChan
   return channel?.isTextBased() ? (channel as TextChannel) : null;
 }
 
+export type ClipFormat = 'mp3' | 'video';
+
 interface PublishOptions {
   packets: Map<string, OpusPacket[]>;
   seconds: number;
   kind: 'clip' | 'replay';
+  format?: ClipFormat;
+}
+
+// O avatar e o apelido só existem no cliente do Discord. Buscar o membro é o que
+// transforma um id de usuário em alguém reconhecível dentro do vídeo.
+async function resolveParticipants(
+  interaction: ChatInputCommandInteraction,
+  userIds: string[]
+): Promise<Participant[]> {
+  const out: Participant[] = [];
+  for (const userId of userIds) {
+    try {
+      const member = await interaction.guild?.members.fetch(userId);
+      out.push({
+        userId,
+        name: member?.displayName ?? 'usuario',
+        avatarUrl: member?.displayAvatarURL({ extension: 'png', size: 256 }) ?? null,
+      });
+    } catch {
+      out.push({ userId, name: 'usuario', avatarUrl: null });
+    }
+  }
+  return out;
 }
 
 export async function publishClip(
   interaction: ChatInputCommandInteraction,
-  { packets, seconds, kind }: PublishOptions
+  { packets, seconds, kind, format = 'mp3' }: PublishOptions
 ): Promise<void> {
   const label = formatLabel(seconds);
   const filename = `${kind}_${interaction.guildId}_${Date.now()}`;
@@ -60,6 +86,7 @@ export async function publishClip(
 
   let filePath: string;
   let wavePath: string | null = null;
+  let videoPath: string | null = null;
   try {
     filePath = await exportClip(packets, filename, seconds, limit);
   } catch (err: any) {
@@ -69,21 +96,51 @@ export async function publishClip(
   }
 
   try {
-    const size = fs.statSync(filePath).size;
-    if (size > limit) {
+    const audioSize = fs.statSync(filePath).size;
+    if (audioSize > limit) {
       const capMin = Math.floor(clipSecondsCap(interaction) / 60);
       await interaction.editReply(
-        `❌ O clip ficou com ${(size / 1024 / 1024).toFixed(1)} MB e este servidor aceita até ` +
+        `❌ O clip ficou com ${(audioSize / 1024 / 1024).toFixed(1)} MB e este servidor aceita até ` +
           `${Math.round(limit / 1024 / 1024)} MB. Peça no máximo **${capMin} min**.`
       );
       return;
     }
 
-    const attachment = new AttachmentBuilder(filePath, { name: `${kind}-${label.replace(/\s/g, '')}.mp3` });
-    const files: AttachmentBuilder[] = [attachment];
+    // O vídeo é um extra: se o render falhar, o clip ainda sai em áudio. Perder o
+    // clip inteiro porque a sala não desenhou seria trocar uma coisa boa por nada.
+    let videoNote = '';
+    if (format === 'video') {
+      if (seconds > MAX_VIDEO_SECONDS) {
+        videoNote = `\n⚠️ Sala em vídeo vai até ${MAX_VIDEO_SECONDS / 60} min — mandei o áudio.`;
+      } else if (renderBusy()) {
+        videoNote = '\n⚠️ Já tem um vídeo renderizando agora — mandei o áudio.';
+      } else {
+        await interaction.editReply('🎞️ Montando a sala... isso leva alguns segundos.');
+        try {
+          const participants = await resolveParticipants(interaction, [...packets.keys()]);
+          videoPath = await exportRoomVideo(packets, participants, filePath, filename, `${kind} • ${label}`);
+          if (fs.statSync(videoPath).size > limit) {
+            videoPath = null;
+            videoNote = '\n⚠️ O vídeo passou do limite de anexo do servidor — mandei o áudio.';
+          }
+        } catch (err: any) {
+          logger.error(`[CLIP] ${interaction.guildId}: vídeo falhou: ${err?.message}`);
+          videoPath = null;
+          videoNote = '\n⚠️ Não consegui montar a sala em vídeo — mandei o áudio.';
+        }
+      }
+    }
 
-    wavePath = await exportWaveform(filePath);
-    if (wavePath) files.push(new AttachmentBuilder(wavePath, { name: 'waveform.png' }));
+    const files: AttachmentBuilder[] = [];
+    const size = videoPath ? fs.statSync(videoPath).size : audioSize;
+
+    if (videoPath) {
+      files.push(new AttachmentBuilder(videoPath, { name: `${kind}-${label.replace(/\s/g, '')}.mp4` }));
+    } else {
+      files.push(new AttachmentBuilder(filePath, { name: `${kind}-${label.replace(/\s/g, '')}.mp3` }));
+      wavePath = await exportWaveform(filePath);
+      if (wavePath) files.push(new AttachmentBuilder(wavePath, { name: 'waveform.png' }));
+    }
 
     const voiceChannel = interaction.guild?.members.me?.voice.channel?.name;
     const embed = new EmbedBuilder()
@@ -107,12 +164,12 @@ export async function publishClip(
     const clipsChannel = resolveClipsChannel(interaction);
     if (clipsChannel && clipsChannel.id !== interaction.channelId) {
       await clipsChannel.send({ embeds: [embed], files });
-      await interaction.editReply(`✅ Clip de ${label} postado em <#${clipsChannel.id}>.`);
+      await interaction.editReply(`✅ Clip de ${label} postado em <#${clipsChannel.id}>.${videoNote}`);
     } else {
-      await interaction.editReply({ content: '', embeds: [embed], files });
+      await interaction.editReply({ content: videoNote.trim(), embeds: [embed], files });
     }
   } finally {
-    const temps = wavePath ? [filePath, wavePath] : [filePath];
+    const temps = [filePath, wavePath, videoPath].filter((p): p is string => p !== null);
     setTimeout(() => {
       for (const p of temps) {
         try {

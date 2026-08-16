@@ -1,7 +1,10 @@
 FROM node:22-slim
 
+# fonts-dejavu-core: o node:22-slim vem sem nenhuma fonte, e o drawtext do ffmpeg
+# exige um arquivo .ttf. Sem isso o vídeo da sala sai sem os nomes das pessoas.
 RUN apt-get update && apt-get install -y \
   ffmpeg \
+  fonts-dejavu-core \
   python3 \
   curl \
   ca-certificates \

@@ -20,6 +20,7 @@ export interface PlanLimits {
   clipsChannel: boolean;
   stats: boolean;
   isolatedClip: boolean;
+  roomVideo: boolean;
   weeklyRecap: boolean;
   support: SupportChannel;
 }
@@ -41,6 +42,7 @@ export const PLANS: Record<Plan, PlanLimits> = {
     clipsChannel: true,
     stats: true,
     isolatedClip: false,
+    roomVideo: false,
     weeklyRecap: false,
     support: 'discord',
   },
@@ -54,6 +56,7 @@ export const PLANS: Record<Plan, PlanLimits> = {
     clipsChannel: false,
     stats: false,
     isolatedClip: false,
+    roomVideo: false,
     weeklyRecap: false,
     support: 'site',
   },
@@ -67,6 +70,7 @@ export const PLANS: Record<Plan, PlanLimits> = {
     clipsChannel: true,
     stats: true,
     isolatedClip: false,
+    roomVideo: false,
     weeklyRecap: false,
     support: 'discord',
   },
@@ -80,6 +84,7 @@ export const PLANS: Record<Plan, PlanLimits> = {
     clipsChannel: true,
     stats: true,
     isolatedClip: true,
+    roomVideo: true,
     weeklyRecap: true,
     support: 'whatsapp',
   },
@@ -95,6 +100,7 @@ export const PLANS: Record<Plan, PlanLimits> = {
     clipsChannel: true,
     stats: true,
     isolatedClip: false,
+    roomVideo: false,
     weeklyRecap: false,
     support: 'discord',
   },
@@ -113,6 +119,7 @@ export const PLANS: Record<Plan, PlanLimits> = {
     clipsChannel: true,
     stats: true,
     isolatedClip: true,
+    roomVideo: true,
     weeklyRecap: true,
     support: 'whatsapp',
   },
@@ -133,6 +140,7 @@ export const FREE_LIMITS: PlanLimits = {
   clipsChannel: false,
   stats: false,
   isolatedClip: false,
+  roomVideo: false,
   weeklyRecap: false,
   support: 'site',
 };
