@@ -97,6 +97,7 @@ function addColumn(table: string, column: string, definition: string): void {
 
 addColumn('guild_settings', 'live_counter', 'INTEGER NOT NULL DEFAULT 0');
 addColumn('licenses', 'owner_id', 'TEXT');
+addColumn('feedback', 'can_publish', 'INTEGER NOT NULL DEFAULT 0');
 
 db.exec(`CREATE INDEX IF NOT EXISTS idx_licenses_owner ON licenses(owner_id)`);
 
@@ -275,8 +276,8 @@ export const dbStatements: Record<string, Statement> = {
   pruneEvents: db.prepare(`DELETE FROM events WHERE synced = 1 AND created_at < ?`),
 
   addFeedback: db.prepare(`
-    INSERT INTO feedback (guild_id, guild_name, user_id, username, rating, message, created_at)
-    VALUES (@guild_id, @guild_name, @user_id, @username, @rating, @message, @created_at)
+    INSERT INTO feedback (guild_id, guild_name, user_id, username, rating, message, created_at, can_publish)
+    VALUES (@guild_id, @guild_name, @user_id, @username, @rating, @message, @created_at, @can_publish)
   `),
 
   pendingFeedback: db.prepare(`SELECT * FROM feedback WHERE synced = 0 ORDER BY id LIMIT ?`),

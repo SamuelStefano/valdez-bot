@@ -26,6 +26,13 @@ export const data = new SlashCommandBuilder()
         { name: '⭐⭐⭐⭐', value: 4 },
         { name: '⭐⭐⭐⭐⭐', value: 5 }
       )
+  )
+  // Depoimento no site é dado pessoal saindo do Discord. Pedir aqui é a única
+  // forma de publicar sem trair quem só queria reclamar de um bug em particular.
+  .addBooleanOption((opt) =>
+    opt
+      .setName('publicar')
+      .setDescription('Deixa eu usar seu recado no site do Valdez, com seu nome do Discord')
   );
 
 export async function execute(interaction: ChatInputCommandInteraction) {
@@ -47,6 +54,8 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     return;
   }
 
+  const canPublish = interaction.options.getBoolean('publicar') ?? false;
+
   try {
     dbStatements.addFeedback.run({
       guild_id: guildId,
@@ -56,6 +65,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       rating: interaction.options.getInteger('nota'),
       message: interaction.options.getString('mensagem', true),
       created_at: Math.floor(Date.now() / 1000),
+      can_publish: canPublish ? 1 : 0,
     });
   } catch (err: any) {
     logger.error(`[FEEDBACK] ${guildId}: falha ao gravar: ${err?.message}`);
@@ -64,7 +74,9 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   }
 
   await interaction.reply({
-    content: '✅ Recebido, valeu! Leio todos — se for bug, costumo consertar na mesma semana.',
+    content:
+      '✅ Recebido, valeu! Leio todos — se for bug, costumo consertar na mesma semana.' +
+      (canPublish ? '\n*Posso publicar esse recado no site. Se mudar de ideia, é só me chamar.*' : ''),
     ephemeral: true,
   });
 }

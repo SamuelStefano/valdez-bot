@@ -126,6 +126,7 @@ async function pushFeedback(): Promise<void> {
       username: r.username,
       rating: r.rating,
       message: r.message,
+      can_publish: r.can_publish === 1,
       created_at: iso(r.created_at),
     }))
   );
