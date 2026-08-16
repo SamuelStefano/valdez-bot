@@ -1,7 +1,7 @@
 import { Client } from 'discord.js';
 import { dbStatements } from '../utils/database';
 import { getSettings } from './guildSettings';
-import { saveLicense, getLicense, Plan, LicenseStatus, PLANS } from './licensing';
+import { saveLicense, getLicense, priceCents, Plan, LicenseStatus, PLANS } from './licensing';
 import { clearExpiredNotice } from './billingNotice';
 import { isConnected, listConnections, evaluatePresence } from './voiceManager';
 import { isBuffering } from './replayBuffer';
@@ -81,10 +81,7 @@ async function pushGuilds(client: Client): Promise<void> {
       guild_id: l.guildId,
       plan: l.plan,
       status: l.status,
-      // O preço de fundador congela a mensalidade, não o vitalício: R$ 150 já é
-      // pagamento único, aplicar o desconto ali seria vender o produto a R$ 10.
-      price_cents:
-        l.founder && l.plan !== 'trial' && l.plan !== 'lifetime' ? 1000 : PLANS[l.plan].priceCents,
+      price_cents: priceCents(l.plan, l.founder),
       founder: l.founder,
       started_at: iso(l.startedAt),
       expires_at: iso(l.expiresAt),

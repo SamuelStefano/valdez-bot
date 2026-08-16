@@ -7,11 +7,18 @@ import {
   daysLeft,
   founderSlotsLeft,
   lifetimeSlotsLeft,
+  quoteUpgrade,
   LIFETIME_SLOTS,
 } from '../modules/licensing';
 import type { MusicTier } from '../modules/licensing';
 import { formatLabel } from '../modules/clipPublisher';
 import { config } from '../config';
+
+// Sem toLocaleString de propósito: o valor proporcional tem centavos e o
+// container não garante ICU completo.
+function brl(cents: number): string {
+  return `R$ ${(cents / 100).toFixed(2).replace('.', ',')}`;
+}
 
 const MUSIC_LABEL: Record<MusicTier, string> = {
   none: 'não',
@@ -86,6 +93,27 @@ export async function execute(interaction: ChatInputCommandInteraction) {
         value: `Tudo do Pro, sem mensalidade nunca mais. Restam **${lifetimeSlotsLeft()}** de ${LIFETIME_SLOTS} vagas.`,
       }
     );
+
+  // Só aparece pra quem já pagou o mês corrente: pra quem está no teste ou
+  // vencido o preço é o cheio da tabela acima, e repetir isso aqui confundiria.
+  const upgrades = (['pro', 'max'] as const)
+    .map((p) => quoteUpgrade(guildId, p))
+    .filter((q): q is NonNullable<typeof q> => q !== null && q.keepsExpiry);
+
+  if (upgrades.length > 0) {
+    embed.addFields({
+      name: '⬆️ Subir de plano hoje',
+      value:
+        upgrades
+          .map(
+            (q) =>
+              `• **${PLANS[q.to].label}**: você paga **${brl(q.dueCents)}** agora` +
+              (q.dueCents === 0 ? ' (fundador — sai de graça)' : ` em vez de ${brl(q.fullCents)}`)
+          )
+          .join('\n') +
+        `\n\nO que você já pagou vira crédito pelos **${upgrades[0].daysLeft} dia(s)** que faltam, e o vencimento não muda.`,
+    });
+  }
 
   if (slots > 0) {
     embed.addFields({

@@ -127,6 +127,8 @@ export const SUPPORT_LABEL: Record<SupportChannel, string> = {
 
 export const TRIAL_DAYS = 3;
 export const FOUNDER_SLOTS = 100;
+export const FOUNDER_PRICE_CENTS = 1000;
+export const CYCLE_DAYS = 30;
 // Vitalício sem teto quebraria a receita recorrente: cada venda é caixa hoje e
 // custo pra sempre. 50 é o que dá pra bancar como oferta de largada.
 export const LIFETIME_SLOTS = 50;
@@ -305,6 +307,55 @@ export function upsell(feature: string, minPlan: Plan = 'pro'): string {
     .map((p) => `${PLANS[p].label} (${brl(PLANS[p].priceCents)})`)
     .join(', ');
   return `🔒 **${feature}** está no ${names}.\nUse \`/assinatura\` para ver os planos.`;
+}
+
+// O preço de fundador congela a mensalidade em qualquer plano mensal — é
+// exatamente o que foi prometido nas 100 primeiras vagas, então subir de plano
+// não pode custar mais caro pra quem entrou cedo. O vitalício fica de fora: R$
+// 150 já é pagamento único, aplicar o desconto ali venderia o produto a R$ 10.
+export function priceCents(plan: Plan, founder: boolean): number {
+  if (founder && plan !== 'trial' && plan !== 'lifetime') return FOUNDER_PRICE_CENTS;
+  return PLANS[plan].priceCents;
+}
+
+export interface UpgradeQuote {
+  to: Plan;
+  fullCents: number;
+  dueCents: number;
+  daysLeft: number;
+  keepsExpiry: boolean;
+}
+
+// Quem já pagou o mês não paga de novo pra subir: o que sobrou do plano atual
+// vira crédito e ele completa só a diferença pelos dias que faltam. Cobrar cheio
+// faria o dono esperar o vencimento — e nesse meio tempo ele desiste.
+// Devolve null quando não existe caminho de upgrade (mesmo plano, plano abaixo,
+// ou vitalício, que já pagou pra sempre).
+export function quoteUpgrade(guildId: string, to: Plan): UpgradeQuote | null {
+  if (to === 'trial') return null;
+
+  const license = getLicense(guildId);
+  const active = isActive(guildId);
+  if (license.plan === 'lifetime' && active) return null;
+
+  const fullCents = priceCents(to, license.founder);
+  if (to === 'lifetime') return { to, fullCents, dueCents: fullCents, daysLeft: 0, keepsExpiry: false };
+
+  const toIdx = UPSELL_LADDER.indexOf(to);
+  const fromIdx = UPSELL_LADDER.indexOf(license.plan);
+  if (toIdx === -1 || (fromIdx !== -1 && fromIdx >= toIdx)) return null;
+
+  // O crédito só existe pra quem pagou o ciclo corrente. No teste ninguém pagou
+  // nada, então lá é preço cheio e o mês começa do zero — senão quem assina no
+  // último dia do teste levaria o plano por trocado.
+  if (fromIdx === -1 || !active) {
+    return { to, fullCents, dueCents: fullCents, daysLeft: 0, keepsExpiry: false };
+  }
+
+  const left = Math.min(daysLeft(license) ?? 0, CYCLE_DAYS);
+  const credit = priceCents(license.plan, license.founder);
+  const dueCents = Math.max(0, Math.round(((fullCents - credit) * left) / CYCLE_DAYS));
+  return { to, fullCents, dueCents, daysLeft: left, keepsExpiry: true };
 }
 
 export function dropLicenseCache(guildId: string): void {
