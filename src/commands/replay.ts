@@ -1,6 +1,6 @@
 import { ChatInputCommandInteraction, SlashCommandBuilder } from 'discord.js';
 import { startRecording, stopRecording, getActiveRecordings, isBuffering } from '../modules/replayBuffer';
-import { publishClip, formatLabel, ClipFormat } from '../modules/clipPublisher';
+import { publishClip, formatLabel } from '../modules/clipPublisher';
 import { limits, upsell } from '../modules/licensing';
 import { track } from '../modules/telemetry';
 import { config } from '../config';
@@ -13,18 +13,7 @@ export const data = new SlashCommandBuilder()
     sub.setName('start').setDescription('Começa a gravar (salva os últimos 2 min + continua)')
   )
   .addSubcommand((sub) =>
-    sub
-      .setName('stop')
-      .setDescription('Para a gravação e envia o áudio')
-      .addStringOption((opt) =>
-        opt
-          .setName('formato')
-          .setDescription('Áudio para ouvir, vídeo da sala para postar')
-          .addChoices(
-            { name: '🎧 Áudio (mp3)', value: 'mp3' },
-            { name: '🎬 Vídeo da sala (mp4)', value: 'video' }
-          )
-      )
+    sub.setName('stop').setDescription('Para a gravação e envia o áudio')
   );
 
 export async function execute(interaction: ChatInputCommandInteraction) {
@@ -87,15 +76,8 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     }
 
     const seconds = Math.round((Date.now() - startedAt) / 1000) + config.startLookbackSeconds;
-    // Aqui a duração só é conhecida depois do stop, então o corte do vídeo não dá
-    // pra fazer antes: o publisher devolve em áudio e avisa quando passou.
-    const format = (interaction.options.getString('formato') ?? 'mp3') as ClipFormat;
-    if (format === 'video' && !limits(guildId).roomVideo) {
-      await interaction.editReply(upsell('Vídeo da sala', 'max'));
-      return;
-    }
 
-    track(guildId, 'replay', { userId: interaction.user.id, seconds, detail: format });
-    await publishClip(interaction, { packets, seconds, kind: 'replay', format });
+    track(guildId, 'replay', { userId: interaction.user.id, seconds, detail: 'mp3' });
+    await publishClip(interaction, { packets, seconds, kind: 'replay' });
   }
 }

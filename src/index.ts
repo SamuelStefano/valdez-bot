@@ -24,6 +24,7 @@ import { track } from './modules/telemetry';
 import { clearExpiredNotice } from './modules/billingNotice';
 import { sendOnboarding } from './modules/onboarding';
 import { initMusicModal, handleMusicButton } from './modules/musicModal';
+import { handleClipButton } from './modules/clipPublisher';
 import { logSpotifyStatus } from './utils/spotifyApi';
 import { startHealthServer, startHeartbeat } from './utils/health';
 import { startSupabaseSync } from './modules/supabaseSync';
@@ -155,6 +156,12 @@ client.on('interactionCreate', async (interaction) => {
         await handleMusicButton(interaction);
       } catch (err: any) {
         logger.error(`Music button error: ${err?.message}`);
+      }
+    } else if (interaction.customId.startsWith('clip:')) {
+      try {
+        await handleClipButton(interaction);
+      } catch (err: any) {
+        logger.error(`Clip button error: ${err?.message}`);
       }
     }
     return;

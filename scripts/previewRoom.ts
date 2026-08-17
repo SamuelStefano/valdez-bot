@@ -33,10 +33,11 @@ for (let u = 0; u < people; u++) {
   });
 }
 
-console.log('timeline:', [...speakingTimeline(packets)].map(([id, segs]) => `${id}=${segs.length}`).join(' '));
+const timeline = speakingTimeline(packets);
+console.log('timeline:', [...timeline].map(([id, segs]) => `${id}=${segs.length}`).join(' '));
 
 const started = Date.now();
-exportRoomVideo(packets, participants, audio, 'preview', `clip de ${seconds}s`)
+exportRoomVideo(timeline, participants, audio, 'preview', `clip de ${seconds}s`)
   .then((out) => {
     const size = fs.statSync(out).size;
     console.log(`ok ${out} ${(size / 1024).toFixed(0)}KB em ${((Date.now() - started) / 1000).toFixed(1)}s`);
