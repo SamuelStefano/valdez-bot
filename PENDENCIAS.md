@@ -1,256 +1,155 @@
 # Valdez — o que está aberto
 
-Atualizado em 2026-08-17.
-
-Ordem abaixo é a ordem de fazer. Passo 1 e 2 são de segundos e destravam o
-que você viu quebrado agora.
+Atualizado em 2026-08-17, depois das suas 10 respostas.
 
 ---
 
-## PASSO 1 — Autorizar o push do site (10 segundos)
+## DECIDIDO (você delegou, eu decidi)
 
-**Problema que isso resolve:** você viu "3 dias" na landing.
+### Gateway: **Woovi**
 
-O código já está sem teste grátis. O que está no ar não é o código: é um build
-de `baa7470`, de antes da correção. Meu commit `6e4b0c2` está parado na sua
-máquina porque push pra `main` = deploy, e deploy eu não faço sem seu ok.
+Você tem MEI, então CNPJ não é problema e as duas opções estavam abertas.
+Pesquisei taxa atual das três candidatas contra os *seus* preços:
 
-**O que fazer:** me responder `pode pushar o site`.
+| Provedor | Taxa | No plano R$ 10 | No plano R$ 30 |
+|---|---|---|---|
+| **Woovi** | 0,80%, mínimo R$ 0,50 | R$ 0,50 (5%) | R$ 0,50 (1,7%) |
+| Asaas | 30 grátis/mês, depois **R$ 2,00 fixo** | R$ 2,00 (**20%**) | R$ 2,00 (6,7%) |
+| Mercado Pago | recorrência só cartão/saldo | — | — |
 
-Aí eu rodo:
+**Mercado Pago está fora:** a recorrência dele (`/preapproval`) roda com cartão de
+crédito e saldo em conta. Não achei confirmação de Pix Automático via API. Seu
+público é jovem brasileiro — exigir cartão de crédito corta metade dele.
 
+**Asaas parece grátis e vira armadilha.** Os 30 Pix/mês grátis cobrem o começo,
+mas o R$ 2,00 fixo depois disso come **20% do plano de R$ 10** — que é
+justamente o preço de fundador dos seus 100 primeiros servidores.
+
+**Woovi ganha por não precisar de migração.** Trocar de gateway depois obriga
+*cada assinante* a reautorizar o débito recorrente, e reautorização é evento de
+churn: parte não refaz e você perde receita que já tinha. Como o custo absoluto
+da Woovi hoje é irrisório (10 assinantes = R$ 5/mês), não existe motivo pra
+economizar agora e pagar migração depois.
+
+Pix Automático está em produção desde 16/06/2025 (Resolução BCB 402) e a Woovi
+expõe por API (`POST /api/v1/subscriptions`).
+
+> ⚠️ Efeito colateral que vale saber: R$ 0,50 sobre R$ 10 é 5% de taxa. O plano
+> de fundador tem margem fina. Não muda a decisão, mas pesa se um dia você
+> pensar em baixar mais o preço de entrada.
+
+### Email do /feedback: **Resend**
+
+Free tier confirmado: 3.000 emails/mês, 100/dia. O detalhe que decide: **sem
+domínio próprio verificado**, a Resend envia de `onboarding@resend.dev` e só
+para o email dono da conta. Que é exatamente o seu caso — o `/feedback` manda
+pra você e mais ninguém. Ou seja, funciona hoje, sem esperar o domínio.
+
+(AWS SES exige aprovação pra sair do sandbox; Gmail com app password cai em
+spam e o Google derruba. Não valem o trabalho pra ~20 emails/mês.)
+
+### Hospedagem: **Vercel**
+
+Dokploy roda na sua VPS — a mesma que caiu por memória em julho e vive com
+disco cheio. Página de vendas na máquina que já caiu significa que, quando ela
+cair de novo, ninguém consegue assinar. Vercel é grátis, CDN global, domínio
+custom sem custo, e o `vercel.json` já está no repo.
+
+**Atenção:** hospedagem ≠ domínio. Você ainda precisa registrar um.
+
+---
+
+## O QUE FALTA VOCÊ FAZER
+
+Tudo abaixo é "criar conta e me passar a chave". Nenhuma eu consigo criar no
+seu nome. Depois de cada uma, eu implemento sozinho.
+
+### 1. Registrar o domínio
+`valdezbot.com.br` sai ~R$ 40/ano no registro.br; `.com` ~R$ 60/ano no
+Namecheap/Cloudflare. **Faça primeiro** — o endereço entra na config da Vercel
+*e* no redirect do Discord, e cadastrar errado obriga a refazer os dois.
+
+Me diz o nome que você registrou.
+
+### 2. Criar projeto Supabase do Valdez
+1. Entrar em https://supabase.com/dashboard com a **sua** conta
+2. `New project` → nome `valdez` → região `South America (São Paulo)`
+3. Guardar a senha do banco que ele gera
+4. Ir em `Project Settings` → `API` e copiar **Project URL** e **service_role key**
+5. Salvar pra mim sem colar no chat:
 ```
-cd /home/samuel/valdez-site && git push origin main
+cat > ~/.valdez-supabase <<'EOF'
+URL=https://xxxx.supabase.co
+SERVICE_ROLE=eyJ...
+EOF
+chmod 600 ~/.valdez-supabase
 ```
+Me diz `supabase pronto`. Eu rodo os 3 SQL, migro e troco as env vars.
 
-O workflow `.github/workflows/pages.yml` builda e publica sozinho, ~2 min.
+**Por que importa:** hoje suas licenças e sua receita moram no projeto
+*"Micro SaaS - Inovatech Web Ia"*, que não é seu. Quem tem acesso lá lê tudo.
 
-**O que vai ao ar junto:** landing sem teste grátis, badge "Grátis pra sempre",
-seção "VOCÊ PEDE, EU FAÇO", FAQ de pedido de função, termos de uso novos,
-painel admin com funil "Rodando no grátis".
-
----
-
-## PASSO 2 — Recarregar o Discord (5 segundos)
-
-**Problema que isso resolve:** `This command is outdated, please try again in a few minutes`.
-
-Não é bug do bot. Consultei a API: os 14 comandos estão registrados
-globalmente, com IDs estáveis, `/help` incluso. O que aconteceu: o bot era
-single-server e tinha comandos *guild-scoped*; virou multi-server e passou pra
-*globais*. Seu cliente Discord ainda tem os IDs velhos em cache e tenta chamar
-comando que não existe mais.
-
-**O que fazer:** com o Discord aberto, `Ctrl+R` (ou `Cmd+R` no Mac). Se estiver
-no navegador, `Ctrl+Shift+R`.
-
-Não precisa reinstalar nada. Não vai acontecer de novo — a migração
-guild→global é de uma vez só.
-
----
-
-## PASSO 3 — Decidir o gateway de pagamento (D10)
-
-**Por que é o próximo:** enquanto isso não fecha, você não recebe dinheiro. É o
-único item que bloqueia o produto inteiro.
-
-**O problema:** Pix Automático (cobrança recorrente sem o cliente aprovar toda
-vez) não tem caminho pra CPF em provedor nenhum. Todos exigem CNPJ.
-
-**Opção A — Abrir MEI + Woovi** *(minha recomendação)*
-- MEI sai em ~1 dia no gov.br, custa ~R$ 76/mês de DAS.
-- Woovi dá Pix Automático de verdade: cobra sozinho todo mês.
-- Você emite nota, o que abre a porta de servidor de empresa/creator maior.
-- Passos: abrir MEI no Portal do Empreendedor → abrir conta PJ → criar conta
-  Woovi → me passar as chaves (via arquivo, não pelo chat).
-
-**Opção B — Mercado Pago no CPF**
-- Começa hoje, sem burocracia.
-- **Não tem recorrência automática no Pix.** Todo mês o cliente precisa pagar
-  um QR novo. Na prática você perde assinante por esquecimento.
-- Serve como ponte até o MEI sair.
-
-**O que fazer:** me responder `A`, `B`, ou `B agora e A depois`.
-
----
-
-## PASSO 4 — Decidir o Supabase dedicado (D7)
-
-**O risco:** hoje o Valdez roda no projeto Supabase *"Micro SaaS - Inovatech
-Web Ia"*, que não é seu. Quem tem acesso àquele projeto lê suas licenças, seus
-clientes e seu faturamento. Quando entrar cliente pagante, isso vira dado de
-terceiro na mão de terceiro.
-
-**A migração é pequena:** criar projeto novo no Supabase (grátis), rodar os 3
-arquivos de `supabase/*.sql`, trocar 2 variáveis de ambiente. ~30 min meus,
-zero downtime porque hoje só existe o seu servidor.
-
-**O que fazer:** me responder `pode criar o Supabase do Valdez`. Você vai
-precisar criar o projeto na sua conta (eu não crio projeto no seu nome) e me
-passar a URL + a service key num arquivo — te mando o passo exato na hora.
-
-**Recomendação:** fazer **antes** do primeiro cliente pagante. Depois vira
-migração de dados de cliente.
-
----
-
-## PASSO 5 — Destravar o login com Discord (A1 + A2 + A3)
-
-**Problema que isso resolve:** `Unsupported provider: provider is not enabled`.
-
-São 3 sub-passos, nesta ordem:
-
-**5.1 — Habilitar o provider no Supabase**
-Isso é meu, mas depende do 5.2. Fica pra depois.
-
-**5.2 — Pegar as credenciais no Discord Developer Portal**
-1. Abrir https://discord.com/developers/applications
-2. Entrar no app `1365865955925819546` (o Valdez)
-3. Menu lateral → **OAuth2**
-4. Em **Redirects**, clicar `Add Redirect` e colar exatamente:
-   `https://szqnmuebcatohtegxlxa.supabase.co/auth/v1/callback`
-   *(se o PASSO 4 for aprovado, essa URL muda pro projeto novo — então faça o
-   PASSO 4 primeiro, pra não cadastrar duas vezes)*
-5. `Save Changes`
-6. Ainda em OAuth2, em **Client Secret**, clicar `Reset Secret` e copiar
-
-**5.3 — Me entregar o secret sem colar no chat**
-No terminal:
+### 3. Criar conta Woovi
+1. https://woovi.com → criar conta com o CNPJ do MEI
+2. Menu **API / Integrações** → gerar **AppID**
+3. Salvar:
 ```
-echo 'COLE_O_SECRET_AQUI' > ~/.valdez-discord-secret && chmod 600 ~/.valdez-discord-secret
+echo 'APPID_AQUI' > ~/.valdez-woovi && chmod 600 ~/.valdez-woovi
 ```
-Depois me diz só `secret salvo`. Eu leio o arquivo sem imprimir o conteúdo.
+Me diz `woovi pronto`. Eu implemento cobrança recorrente + webhook.
 
-**5.4 — Me dizer a URL de produção da landing**
-Preciso pra allow-list de redirect do Supabase. Hoje o único endereço que
-conheço é `samuelstefano.github.io/valdez-site`. Se for outro (ou se você
-comprar domínio — ver PASSO 8), me fala qual.
+### 4. Criar conta Resend
+1. https://resend.com → criar conta **com o email que você quer receber o feedback**
+2. `API Keys` → `Create API Key` → permissão `Sending access`
+3. Salvar:
+```
+echo 're_...' > ~/.valdez-resend && chmod 600 ~/.valdez-resend
+```
+Me diz `resend pronto`. Eu ligo o `/feedback` no email.
 
----
+### 5. Discord OAuth (só depois do 1 e do 2)
+1. https://discord.com/developers/applications → app `1365865955925819546`
+2. **OAuth2** → `Add Redirect` → colar a callback do Supabase **novo**
+   (te passo a URL exata quando o passo 2 estiver pronto)
+3. `Save Changes`
+4. **Client Secret** → `Reset Secret` → copiar
+5. `echo 'SECRET' > ~/.valdez-discord-secret && chmod 600 ~/.valdez-discord-secret`
 
-## PASSO 6 — Decidir por onde o /feedback te manda email (D2)
+Isso destrava o `Unsupported provider` e o login no site.
 
-O comando já está pronto e gateado em plano pago. Falta a entrega.
-
-- **Resend** *(recomendo)* — 3.000 emails/mês grátis, API de 5 linhas. Você cria
-  conta em resend.com, gera uma API key, salva num arquivo pra mim.
-- **Gmail com app password** — funciona, mas Google derruba SMTP com frequência
-  e o email cai em spam mais fácil.
-- **n8n está fora.** É infra da DevFellowship. Este produto é seu, não pode
-  depender de infra da empresa.
-
-**O que fazer:** me responder `Resend` ou `Gmail`.
-
----
-
-## PASSO 7 — Decidir os tiers e a copy (D1, D3, D4, D8, D9)
-
-Nenhum bloqueia dinheiro. São ajustes de produto. Pode responder tudo de uma vez.
-
-**D1 — Leaderboard e `/clear`: ficam no grátis ou sobem pro Básico?**
-Você disse "pode deixar no plano mais barato". Hoje estão no grátis.
-*Recomendo deixar no grátis:* o ranking é o que faz o pessoal voltar pro
-servidor. Tirando, o grátis fica só com clip de 30s e não gera hábito — e sem
-hábito ninguém assina.
-
-**D3 — "Colocar o replay na call": o que você quis dizer?**
-(a) o contador ao vivo mostrar que a gravação está ligada, ou
-(b) listar o replay e o limite dele na tabela de planos do site.
-*Já resolvi metade:* o `/help` agora informa o teto de 15 min por gravação.
-
-**D4 — Categorias no menu `/`**
-O Discord **não tem** agrupamento por categoria. Só existem dois caminhos:
-(a) transformar tudo em subcomando (`/gravar clip`, `/musica play`) — agrupa de
-verdade, mas quebra o dedo de quem já usa;
-(b) `/help` com menu por categoria — *já implementei, está no ar*.
-*Recomendo ficar no (b)* e reavaliar se o menu passar de ~20 comandos.
-
-**D8 — Copy do vídeo da sala**
-Manter "NOVIDADE" + comparação, ou afirmar "inédito" no duro?
-*Recomendo manter.* Afirmação absoluta é fácil de alguém derrubar com um
-concorrente qualquer, e aí você perde credibilidade no resto da página.
-
-**D9 — Preço do vitalício**
-Está R$ 150 no código; você falou "uns 120".
-*Recomendo R$ 150* = 5 meses de Pro adiantados. A R$ 120 são 4 meses, e o
-vitalício começa a canibalizar o mensal.
+### 6. Rotacionar credenciais do Craig
+Token de bot e `recordingWebhookSecret` estão em texto puro em
+`~/CRAIG_FIX_STATUS.md` e `~/CRAIG_FULL_INVESTIGATION.md`. Não é do Valdez, mas
+credencial exposta não melhora com o tempo. Rotaciona na infra DFL que eu apago
+os arquivos.
 
 ---
 
-## PASSO 8 — Domínio (D11)
+## JÁ ESTÁ NO AR
 
-Hoje a landing vive num subdomínio do GitHub. Isso derruba conversão: ninguém
-paga R$ 30/mês pra um `github.io`.
-
-**O que fazer:** registrar um domínio (`valdezbot.com.br` sai ~R$ 40/ano no
-registro.br; `.com` ~R$ 60/ano). Me falar qual, que eu configuro o DNS e o
-GitHub Pages.
-
-Se for fazer, **faça antes do PASSO 5**, pra cadastrar o redirect certo de
-primeira.
-
----
-
-## PASSO 9 — Manutenção da VPS (D5)
-
-O disco está enchendo. O ofensor é o build cache do Docker, ~9 GB.
-
-**O que fazer:** me responder `pode limpar`. Eu rodo o prune. Efeito colateral:
-o próximo build de cada projeto da VPS fica mais lento uma vez.
-
-**Sobre sua dúvida de onde ficam os dados:** o áudio **não** é o que enche o
-disco. O buffer vive em memória e é descartado continuamente; o clipe vira
-arquivo só quando alguém pede, sobe pro Discord e é apagado da máquina em
-seguida. O que persiste é só o SQLite de licenças/horas (kilobytes) e o
-espelho no Supabase. Disco cheio é Docker, não Valdez.
-
----
-
-## PASSO 10 — Rotacionar credenciais do Craig (A4)
-
-Não é do Valdez, é dívida de segurança aberta. Os arquivos
-`~/CRAIG_FIX_STATUS.md` e `~/CRAIG_FULL_INVESTIGATION.md` têm token de bot e
-`recordingWebhookSecret` em texto puro.
-
-**O que fazer:** rotacionar os dois na infra DFL. Depois eu apago os arquivos.
-
-Prioridade baixa comparado ao resto, mas credencial exposta não melhora com o
-tempo.
-
----
-
-## O que eu já implementei
-
-- Teste grátis de 3 dias removido ponta a ponta (bot + site + termos de uso).
-  Servidor novo cai direto no grátis, sem prazo e sem cartão.
-- Grátis virou a **ausência** de licença: quem só instalou não vira linha no
-  banco, não entra no MRR nem conta como churn quando sair.
-- `/help` com menu por categoria, explicando cada comando e cada subcomando —
-  inclusive o `/config cargos` que você não sabia pra que servia.
-- `/help` informa o teto do replay: 15 min por gravação, para sozinha e posta
-  o que gravou.
+- Landing sem teste grátis, publicada. Meta description corrigida também.
+- Vídeo da sala afirmado como **inédito**: *"Nenhum outro bot de Discord
+  devolve isso."*
+- Contador ao vivo mostra `🔴 Gravando — 04:12 de 15:00` durante o `/replay`.
+  Quem entra no meio da call vê que está gravando, sem depender do `[REC]`.
+- `owner_id` não é mais apagado a cada sync com o Supabase.
+- `/help` com menu por categoria, incluindo o `/config cargos`.
 - `/feedback` gateado em plano pago.
-- Landing: seção "VOCÊ PEDE, EU FAÇO", FAQ de pedido de função, card de garantia.
-- Painel admin: funil virou "Rodando no grátis", conversão grátis → pago.
+- Grátis virou a ausência de licença: quem só instalou não polui MRR nem churn.
+- Leaderboard e `/clear` **ficam no grátis** (sua resposta 5).
+- Categorias **ficam no `/help`** (sua resposta 7).
+- Vitalício **R$ 150** (sua resposta 9).
+- `docker prune` cancelado — você já liberou espaço.
 
 ---
 
-## Minha fila, destravada por você
+## MINHA FILA
 
 | Item | Destravado por |
-|------|----------------|
-| Cobrança recorrente por Pix | PASSO 3 |
-| Migração do Supabase | PASSO 4 |
-| Login com Discord no site | PASSO 5 |
-| Cadastro de usuário no site | PASSO 5 |
-| Envio de email do `/feedback` | PASSO 6 |
-| `pullLicenses` apagando `owner_id` no sync | nada — faço quando você liberar o push |
-
----
-
-## Já estava certo, não mexi
-
-- Grátis sem música.
-- Vídeo da sala só no Máximo.
-- Contador de call no Pro (intermediário).
-- Música: Básico por link, Pro pra cima com playlist.
+|---|---|
+| Migração do Supabase | você fazer o passo 2 |
+| Cobrança recorrente Woovi + webhook | passo 3 |
+| Email do `/feedback` | passo 4 |
+| Migração pra Vercel | passo 1 |
+| Login com Discord | passos 1, 2 e 5 |
+| Cadastro de usuário no site | login com Discord |
