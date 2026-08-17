@@ -175,6 +175,9 @@ async function pullLicenses(client: Client): Promise<void> {
       founder: !!row.founder,
       startedAt: Math.floor(new Date(row.started_at).getTime() / 1000),
       expiresAt,
+      // O dono só existe no bot — a tabela do Supabase nem tem a coluna. Omitir
+      // aqui fazia cada sync gravar owner_id nulo por cima do dono real.
+      ownerId: local.ownerId,
     });
 
     // Renovou: o bot precisa poder avisar de novo no próximo vencimento e voltar
