@@ -2,6 +2,8 @@ import { Client, EmbedBuilder, Message, TextChannel } from 'discord.js';
 import { getSettings } from './guildSettings';
 import { limits, isActive } from './licensing';
 import { listActiveSessions, formatDuration } from './voiceTracker';
+import { getActiveRecordings } from './replayBuffer';
+import { config } from '../config';
 import { logger } from '../utils/logger';
 
 const REFRESH_MS = 60_000;
@@ -37,7 +39,7 @@ function render(client: Client, guildId: string, counter: Counter, closed: boole
     return `\`${formatDuration(now - s.joinedAt).padEnd(11)}\` ${name}`;
   });
 
-  return new EmbedBuilder()
+  const embed = new EmbedBuilder()
     .setColor(COLOR)
     .setTitle(closed ? '⏱️ Call encerrada' : '⏱️ Call ao vivo')
     .setDescription(
@@ -49,7 +51,21 @@ function render(client: Client, guildId: string, counter: Counter, closed: boole
       name: 'Duração da call',
       value: formatDuration(now - counter.startedAt),
       inline: true,
-    })
+    });
+
+  // Quem entra no meio da call não viu o /replay start. Sem isso, a única pista
+  // de que está sendo gravado é o [REC] no apelido do bot.
+  const recording = [...getActiveRecordings(guildId).values()][0];
+  if (!closed && recording) {
+    const elapsed = Math.floor((Date.now() - recording.startedAt) / 1000);
+    embed.addFields({
+      name: '🔴 Gravando',
+      value: `${formatDuration(elapsed)} de ${formatDuration(config.maxRecordingSeconds)}`,
+      inline: true,
+    });
+  }
+
+  return embed
     .setFooter({ text: closed ? 'Valdez • /horas para o seu total' : 'Valdez • atualiza a cada minuto' })
     .setTimestamp();
 }
