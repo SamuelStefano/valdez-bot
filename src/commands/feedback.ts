@@ -1,5 +1,6 @@
 import { ChatInputCommandInteraction, SlashCommandBuilder } from 'discord.js';
 import { dbStatements } from '../utils/database';
+import { isActive } from '../modules/licensing';
 import { logger } from '../utils/logger';
 
 const DAILY_LIMIT = 3;
@@ -39,6 +40,19 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   const guildId = interaction.guildId;
   if (!guildId) {
     await interaction.reply({ content: '❌ Use este comando dentro de um servidor.', ephemeral: true });
+    return;
+  }
+
+  // Pedido de servidor pagante vira fila de verdade. Abrir o canal pro grátis
+  // enche a fila de quem não sustenta o roadmap e afoga quem sustenta.
+  if (!isActive(guildId)) {
+    await interaction.reply({
+      content:
+        '🔒 **Pedidos e reporte de bug** são de plano pago.\n' +
+        'Quem assina fala direto comigo e pede função nova — eu leio tudo e o que dá pra fazer entra na fila.\n' +
+        'Veja os planos em `/assinatura`.',
+      ephemeral: true,
+    });
     return;
   }
 

@@ -23,7 +23,7 @@ export async function announceExpired(client: Client, guildId: string): Promise<
   const slots = founderSlotsLeft();
   const embed = new EmbedBuilder()
     .setColor(0x99aab5)
-    .setTitle(license.plan === 'trial' ? '⏳ Seu teste acabou' : '⏳ Assinatura vencida')
+    .setTitle('⏳ Assinatura vencida')
     .setDescription(
       'Continuo na call, mas agora só seguro os **últimos 30 segundos**. Dá pra salvar a risada, ' +
         'não dá pra salvar a história que veio antes dela. Nada seu foi perdido — reativando, volto ao normal na hora.'

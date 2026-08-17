@@ -1,7 +1,7 @@
 import { dbStatements } from '../utils/database';
 import { logger } from '../utils/logger';
 
-export type Plan = 'trial' | 'basic' | 'pro' | 'max' | 'lifetime' | 'owner';
+export type Plan = 'free' | 'basic' | 'pro' | 'max' | 'lifetime' | 'owner';
 export type LicenseStatus = 'active' | 'expired' | 'canceled';
 
 export type SupportChannel = 'site' | 'discord' | 'whatsapp';
@@ -25,27 +25,32 @@ export interface PlanLimits {
   support: SupportChannel;
 }
 
+// O gratuito não é um plano que alguém assina: é o que sobra quando não há
+// licença ativa. Não existe linha de licença `free` no banco — o servidor sem
+// licença simplesmente não tem linha, e é isso que mantém o MRR limpo.
+// 30s é escolhido pra frustrar na hora certa — a pérola boa quase sempre precisa
+// do contexto de antes, e é exatamente essa falta que vende o Básico.
+export const FREE_LIMITS: PlanLimits = {
+  label: 'Grátis',
+  priceCents: 0,
+  bufferSeconds: 30,
+  maxClipSeconds: 30,
+  music: 'none',
+  replay: false,
+  clipsChannel: false,
+  stats: false,
+  isolatedClip: false,
+  roomVideo: false,
+  weeklyRecap: false,
+  support: 'site',
+};
+
 // Os limites são o produto. Antes o único degrau real era a janela do buffer, e
 // quem olhava Básico e Pro lado a lado via o mesmo bot com um número diferente —
 // então escolhia pelo preço. Cada plano agora ganha ou perde um recurso que a
 // pessoa consegue nomear sem ler tabela.
-// O teste é uma cópia do Pro de propósito: quem provou o plano do meio não
-// aceita descer pro básico depois.
 export const PLANS: Record<Plan, PlanLimits> = {
-  trial: {
-    label: 'Teste do Pro (3 dias)',
-    priceCents: 0,
-    bufferSeconds: 900,
-    maxClipSeconds: 900,
-    music: 'playlist',
-    replay: true,
-    clipsChannel: true,
-    stats: true,
-    isolatedClip: false,
-    roomVideo: false,
-    weeklyRecap: false,
-    support: 'discord',
-  },
+  free: FREE_LIMITS,
   basic: {
     label: 'Básico',
     priceCents: 1000,
@@ -125,33 +130,12 @@ export const PLANS: Record<Plan, PlanLimits> = {
   },
 };
 
-// O gratuito não é um plano que alguém assina: é o que sobra quando não há
-// licença ativa. Guardar como limite em vez de linha no banco evita migração,
-// CHECK novo no Supabase e um plano fantasma no cálculo de MRR.
-// 30s é escolhido pra frustrar na hora certa — a pérola boa quase sempre precisa
-// do contexto de antes, e é exatamente essa falta que vende o Básico.
-export const FREE_LIMITS: PlanLimits = {
-  label: 'Grátis',
-  priceCents: 0,
-  bufferSeconds: 30,
-  maxClipSeconds: 30,
-  music: 'none',
-  replay: false,
-  clipsChannel: false,
-  stats: false,
-  isolatedClip: false,
-  roomVideo: false,
-  weeklyRecap: false,
-  support: 'site',
-};
-
 export const SUPPORT_LABEL: Record<SupportChannel, string> = {
   site: 'Ticket pelo site',
   discord: 'Direto no Discord',
   whatsapp: 'WhatsApp',
 };
 
-export const TRIAL_DAYS = 3;
 export const FOUNDER_SLOTS = 100;
 export const FOUNDER_PRICE_CENTS = 1000;
 export const CYCLE_DAYS = 30;
@@ -219,9 +203,25 @@ export function getLicense(guildId: string): License {
   if (cached) return cached;
 
   const row = dbStatements.getLicense.get(guildId) as Row | undefined;
-  const license = row ? toLicense(row) : startTrial(guildId);
+  const license = row ? toLicense(row) : freeLicense(guildId);
   cache.set(guildId, license);
   return license;
+}
+
+// Servidor sem licença não vira linha no banco. Gravar um `free` faria cada
+// servidor que só instalou o bot aparecer no painel como cliente e entrar na
+// conta de churn quando saísse.
+function freeLicense(guildId: string): License {
+  const startedAt = now();
+  return {
+    guildId,
+    plan: 'free',
+    status: 'expired',
+    founder: false,
+    startedAt,
+    expiresAt: startedAt,
+    ownerId: resolveOwner(guildId),
+  };
 }
 
 export function saveLicense(license: License): License {
@@ -239,44 +239,13 @@ export function saveLicense(license: License): License {
   return license;
 }
 
-// O teste é ancorado no dono, não no servidor: criar servidor novo é grátis e
-// instantâneo, então cota por guild não segura ninguém. Isso encarece a burla —
-// só fecha de vez com cartão.
-export function startTrial(guildId: string): License {
-  const startedAt = now();
-  const ownerId = resolveOwner(guildId);
-
-  if (ownerId) {
-    const { n } = dbStatements.countTrialsByOwner.get(ownerId, guildId) as { n: number };
-    if (n > 0) {
-      logger.info(`[LICENSE] ${guildId}: dono ${ownerId} já usou o teste — entra bloqueado`);
-      return saveLicense({
-        guildId,
-        plan: 'trial',
-        status: 'expired',
-        founder: false,
-        startedAt,
-        expiresAt: startedAt,
-        ownerId,
-      });
-    }
-  }
-
-  return saveLicense({
-    guildId,
-    plan: 'trial',
-    status: 'active',
-    founder: false,
-    startedAt,
-    expiresAt: startedAt + TRIAL_DAYS * 86400,
-    ownerId,
-  });
-}
-
 // Vencimento é decidido na leitura: sem isso uma licença expirada só cairia no
 // próximo sync com o Supabase, e o servidor seguiria usando de graça.
 export function isActive(guildId: string): boolean {
   const license = getLicense(guildId);
+  // O gratuito é sentinela em memória: deixar cair no saveLicense abaixo criaria
+  // no banco justamente a linha que freeLicense evita.
+  if (license.plan === 'free') return false;
   if (license.status !== 'active') return false;
   if (license.expiresAt !== null && license.expiresAt < now()) {
     saveLicense({ ...license, status: 'expired' });
@@ -308,8 +277,8 @@ export function daysLeft(license: License): number | null {
   return Math.max(0, Math.ceil((license.expiresAt - now()) / 86400));
 }
 
-// O servidor de origem é meu: sem isso ele cairia no teste de 14 dias e o bot
-// sairia da call de casa por falta de pagamento.
+// O servidor de origem é meu: sem isso ele cairia no gratuito e a minha própria
+// call ficaria com 30s de buffer.
 // `founder: false` é obrigatório — fundador é quem PAGOU R$ 10 nas 100 primeiras
 // vagas, e me marcar como um consumia uma vaga real: a landing anunciava 99
 // restantes antes de existir o primeiro cliente.
@@ -342,11 +311,11 @@ export function upsell(feature: string, minPlan: Plan = 'pro'): string {
 // exatamente o que foi prometido nas 100 primeiras vagas, então subir de plano
 // não pode custar mais caro pra quem entrou cedo. O vitalício fica de fora: R$
 // 150 já é pagamento único, aplicar o desconto ali venderia o produto a R$ 10.
-// `owner` fora do desconto junto do teste e do vitalício: o preço dele é zero e
-// aplicar o piso de fundador cobraria R$ 10 de mim mesmo — que foi exatamente o
-// bug que colocou a minha call no MRR.
+// `owner` fora do desconto junto do gratuito e do vitalício: o preço dele é zero
+// e aplicar o piso de fundador cobraria R$ 10 de mim mesmo — que foi exatamente
+// o bug que colocou a minha call no MRR.
 export function priceCents(plan: Plan, founder: boolean): number {
-  if (founder && plan !== 'trial' && plan !== 'lifetime' && plan !== 'owner') return FOUNDER_PRICE_CENTS;
+  if (founder && plan !== 'free' && plan !== 'lifetime' && plan !== 'owner') return FOUNDER_PRICE_CENTS;
   return PLANS[plan].priceCents;
 }
 
@@ -364,7 +333,7 @@ export interface UpgradeQuote {
 // Devolve null quando não existe caminho de upgrade (mesmo plano, plano abaixo,
 // vitalício, que já pagou pra sempre, ou o meu próprio servidor).
 export function quoteUpgrade(guildId: string, to: Plan): UpgradeQuote | null {
-  if (to === 'trial' || to === 'owner') return null;
+  if (to === 'free' || to === 'owner') return null;
 
   const license = getLicense(guildId);
   const active = isActive(guildId);
@@ -378,9 +347,8 @@ export function quoteUpgrade(guildId: string, to: Plan): UpgradeQuote | null {
   const fromIdx = UPSELL_LADDER.indexOf(license.plan);
   if (toIdx === -1 || (fromIdx !== -1 && fromIdx >= toIdx)) return null;
 
-  // O crédito só existe pra quem pagou o ciclo corrente. No teste ninguém pagou
-  // nada, então lá é preço cheio e o mês começa do zero — senão quem assina no
-  // último dia do teste levaria o plano por trocado.
+  // O crédito só existe pra quem pagou o ciclo corrente. No gratuito e no
+  // vencido ninguém pagou nada, então é preço cheio e o mês começa do zero.
   if (fromIdx === -1 || !active) {
     return { to, fullCents, dueCents: fullCents, daysLeft: 0, keepsExpiry: false };
   }

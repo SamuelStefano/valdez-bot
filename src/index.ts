@@ -43,6 +43,8 @@ import * as privacidade from './commands/privacidade';
 import * as assinatura from './commands/assinatura';
 import * as feedback from './commands/feedback';
 import * as clear from './commands/clear';
+import * as help from './commands/help';
+import { handleHelpSelect } from './commands/help';
 
 const commands = new Map<string, { execute: (i: ChatInputCommandInteraction) => Promise<void> }>();
 commands.set('ping', ping);
@@ -58,6 +60,7 @@ commands.set('privacidade', privacidade);
 commands.set('assinatura', assinatura);
 commands.set('feedback', feedback);
 commands.set('clear', clear);
+commands.set('help', help);
 
 const allCommandsData = [
   ping.data.toJSON(),
@@ -73,6 +76,7 @@ const allCommandsData = [
   assinatura.data.toJSON(),
   feedback.data.toJSON(),
   clear.data.toJSON(),
+  help.data.toJSON(),
 ];
 
 const client = new Client({
@@ -133,8 +137,7 @@ client.once('ready', async () => {
 
 client.on('guildCreate', async (guild) => {
   logger.info(`[GUILD] entrei em ${guild.name} (${guild.id})`);
-  // Ler a licença já cria o teste de 14 dias — o servidor novo nunca cai no bot
-  // sem plano nenhum.
+  // Servidor novo entra no gratuito: sem teste, sem licença gravada.
   const license = getLicense(guild.id);
   clearExpiredNotice(guild.id);
   track(guild.id, 'guild_join', { detail: license.plan });
@@ -153,6 +156,17 @@ client.on('guildDelete', (guild) => {
 });
 
 client.on('interactionCreate', async (interaction) => {
+  if (interaction.isStringSelectMenu()) {
+    if (interaction.customId === 'help:cat') {
+      try {
+        await handleHelpSelect(interaction);
+      } catch (err: any) {
+        logger.error(`Help select error: ${err?.message}`);
+      }
+    }
+    return;
+  }
+
   if (interaction.isButton()) {
     if (interaction.customId.startsWith('music:')) {
       try {

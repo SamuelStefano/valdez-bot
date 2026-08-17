@@ -279,7 +279,9 @@ export async function execute(interaction: ChatInputCommandInteraction) {
         value:
           license.status === 'active'
             ? `${plan.label}${restam !== null ? ` — ${restam} dia(s)` : ''}`
-            : `⚠️ ${plan.label} — assinatura vencida, \`/assinatura\``,
+            : license.plan === 'free'
+              ? `${plan.label} — assine em \`/assinatura\``
+              : `⚠️ ${plan.label} — assinatura vencida, \`/assinatura\``,
         inline: true,
       },
       {

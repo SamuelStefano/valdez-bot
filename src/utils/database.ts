@@ -42,7 +42,7 @@ db.exec(`
 
   CREATE TABLE IF NOT EXISTS licenses (
     guild_id TEXT PRIMARY KEY,
-    plan TEXT NOT NULL DEFAULT 'trial',
+    plan TEXT NOT NULL DEFAULT 'basic',
     status TEXT NOT NULL DEFAULT 'active',
     founder INTEGER NOT NULL DEFAULT 0,
     started_at INTEGER NOT NULL,
@@ -241,11 +241,6 @@ export const dbStatements: Record<string, Statement> = {
       expires_at = excluded.expires_at,
       updated_at = excluded.updated_at,
       owner_id = COALESCE(excluded.owner_id, licenses.owner_id)
-  `),
-
-  countTrialsByOwner: db.prepare(`
-    SELECT COUNT(*) as n FROM licenses
-    WHERE owner_id = ? AND guild_id != ? AND plan = 'trial'
   `),
 
   countFounders: db.prepare(`SELECT COUNT(*) as n FROM licenses WHERE founder = 1`),

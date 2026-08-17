@@ -75,9 +75,12 @@ async function pushGuilds(client: Client): Promise<void> {
 
   // A licença tem FK pra guilds, então só sobe depois — e price_cents vem da
   // tabela de planos pra o painel somar receita sem repetir a regra de preço.
-  const licenses = client.guilds.cache.map((guild) => {
-    const l = getLicense(guild.id);
-    return {
+  // Servidor no gratuito não tem licença: subir uma linha `free` colocaria quem
+  // só instalou o bot no painel como cliente — e o CHECK da tabela nem aceita.
+  const licenses = client.guilds.cache
+    .map((guild) => getLicense(guild.id))
+    .filter((l) => l.plan !== 'free')
+    .map((l) => ({
       guild_id: l.guildId,
       plan: l.plan,
       status: l.status,
@@ -86,8 +89,7 @@ async function pushGuilds(client: Client): Promise<void> {
       started_at: iso(l.startedAt),
       expires_at: iso(l.expiresAt),
       updated_at: new Date().toISOString(),
-    };
-  });
+    }));
   await upsert('licenses', licenses, 'guild_id');
 }
 

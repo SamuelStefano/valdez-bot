@@ -95,8 +95,8 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       }
     );
 
-  // Só aparece pra quem já pagou o mês corrente: pra quem está no teste ou
-  // vencido o preço é o cheio da tabela acima, e repetir isso aqui confundiria.
+  // Só aparece pra quem já pagou o mês corrente: no gratuito e no vencido o
+  // preço é o cheio da tabela acima, e repetir isso aqui confundiria.
   const upgrades = (['pro', 'max'] as const)
     .map((p) => quoteUpgrade(guildId, p))
     .filter((q): q is NonNullable<typeof q> => q !== null && q.keepsExpiry);
