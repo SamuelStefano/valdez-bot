@@ -7,6 +7,7 @@ export type EventKind =
   | 'clip'
   | 'replay'
   | 'music'
+  | 'clear'
   | 'optout'
   | 'optin'
   | 'license_expired'

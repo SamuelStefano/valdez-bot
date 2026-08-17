@@ -42,6 +42,7 @@ import * as configCmd from './commands/config';
 import * as privacidade from './commands/privacidade';
 import * as assinatura from './commands/assinatura';
 import * as feedback from './commands/feedback';
+import * as clear from './commands/clear';
 
 const commands = new Map<string, { execute: (i: ChatInputCommandInteraction) => Promise<void> }>();
 commands.set('ping', ping);
@@ -56,6 +57,7 @@ commands.set('config', configCmd);
 commands.set('privacidade', privacidade);
 commands.set('assinatura', assinatura);
 commands.set('feedback', feedback);
+commands.set('clear', clear);
 
 const allCommandsData = [
   ping.data.toJSON(),
@@ -70,6 +72,7 @@ const allCommandsData = [
   privacidade.data.toJSON(),
   assinatura.data.toJSON(),
   feedback.data.toJSON(),
+  clear.data.toJSON(),
 ];
 
 const client = new Client({
