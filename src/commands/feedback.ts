@@ -1,6 +1,7 @@
 import { ChatInputCommandInteraction, SlashCommandBuilder } from 'discord.js';
 import { dbStatements } from '../utils/database';
 import { isActive } from '../modules/licensing';
+import { sendFeedbackEmail } from '../modules/mailer';
 import { logger } from '../utils/logger';
 
 const DAILY_LIMIT = 3;
@@ -69,6 +70,8 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   }
 
   const canPublish = interaction.options.getBoolean('publicar') ?? false;
+  const message = interaction.options.getString('mensagem', true);
+  const rating = interaction.options.getInteger('nota');
 
   try {
     dbStatements.addFeedback.run({
@@ -76,8 +79,8 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       guild_name: interaction.guild?.name ?? null,
       user_id: interaction.user.id,
       username: interaction.user.username,
-      rating: interaction.options.getInteger('nota'),
-      message: interaction.options.getString('mensagem', true),
+      rating,
+      message,
       created_at: Math.floor(Date.now() / 1000),
       can_publish: canPublish ? 1 : 0,
     });
@@ -86,6 +89,14 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     await interaction.reply({ content: '❌ Não consegui guardar seu feedback. Tenta de novo.', ephemeral: true });
     return;
   }
+
+  sendFeedbackEmail({
+    guildName: interaction.guild?.name ?? null,
+    username: interaction.user.username,
+    rating,
+    message,
+    canPublish,
+  });
 
   await interaction.reply({
     content:
