@@ -1,6 +1,7 @@
 # Valdez — o que está aberto
 
-Atualizado em 2026-08-17, depois das suas 10 respostas.
+Atualizado em 2026-08-18. **Todo o código está escrito e compilando.** O que
+falta é só conta e chave — cada uma destrava um item da fila de uma vez.
 
 ---
 
@@ -48,14 +49,17 @@ pra você e mais ninguém. Ou seja, funciona hoje, sem esperar o domínio.
 (AWS SES exige aprovação pra sair do sandbox; Gmail com app password cai em
 spam e o Google derruba. Não valem o trabalho pra ~20 emails/mês.)
 
-### Hospedagem: **Vercel**
+### Hospedagem: **Vercel**, no `*.vercel.app` por enquanto
 
 Dokploy roda na sua VPS — a mesma que caiu por memória em julho e vive com
 disco cheio. Página de vendas na máquina que já caiu significa que, quando ela
 cair de novo, ninguém consegue assinar. Vercel é grátis, CDN global, domínio
 custom sem custo, e o `vercel.json` já está no repo.
 
-**Atenção:** hospedagem ≠ domínio. Você ainda precisa registrar um.
+Você mandou deixar em `vercel.app` por enquanto, então **o domínio saiu do
+caminho crítico**: nada mais depende dele. O `vite.config.ts` já lê
+`VITE_BASE` do ambiente, e a Vercel não define essa variável — então o site
+serve em `/` sem alterar uma linha.
 
 ---
 
@@ -64,12 +68,20 @@ custom sem custo, e o `vercel.json` já está no repo.
 Tudo abaixo é "criar conta e me passar a chave". Nenhuma eu consigo criar no
 seu nome. Depois de cada uma, eu implemento sozinho.
 
-### 1. Registrar o domínio
-`valdezbot.com.br` sai ~R$ 40/ano no registro.br; `.com` ~R$ 60/ano no
-Namecheap/Cloudflare. **Faça primeiro** — o endereço entra na config da Vercel
-*e* no redirect do Discord, e cadastrar errado obriga a refazer os dois.
+### 1. Publicar o site na Vercel
+1. https://vercel.com → `Continue with GitHub`
+2. `Add New… → Project` → importar `SamuelStefano/valdez-site`
+3. Deixar o build no automático (Vite detectado sozinho)
+4. Em `Environment Variables`, adicionar as três:
+   - `VITE_SUPABASE_URL`
+   - `VITE_SUPABASE_ANON_KEY`
+   - `VITE_CONTACT_EMAIL`
+5. `Deploy` → anotar a URL `xxx.vercel.app` que ele der
 
-Me diz o nome que você registrou.
+Me diz a URL. Eu troco o `SITE_URL` do bot e o redirect do Discord.
+
+**Não registre domínio agora** — você mandou deixar em `vercel.app`, e nada
+mais está esperando por ele.
 
 ### 2. Criar projeto Supabase do Valdez
 1. Entrar em https://supabase.com/dashboard com a **sua** conta
@@ -92,22 +104,37 @@ Me diz `supabase pronto`. Eu rodo os 3 SQL, migro e troco as env vars.
 ### 3. Criar conta Woovi
 1. https://woovi.com → criar conta com o CNPJ do MEI
 2. Menu **API / Integrações** → gerar **AppID**
-3. Salvar:
+3. No mesmo menu, **Webhooks** → copiar o *secret* de assinatura HMAC
+4. Salvar as duas:
 ```
-echo 'APPID_AQUI' > ~/.valdez-woovi && chmod 600 ~/.valdez-woovi
+cat > ~/.valdez-woovi <<'EOF'
+APPID=...
+HMAC=...
+EOF
+chmod 600 ~/.valdez-woovi
 ```
-Me diz `woovi pronto`. Eu implemento cobrança recorrente + webhook.
+Me diz `woovi pronto`. A cobrança e o webhook **já estão escritos** — falta só
+a chave e o deploy das duas Edge Functions.
+
+> O secret de HMAC não é opcional: sem ele a função se recusa a rodar (503).
+> Webhook que "libera geral" quando não consegue validar é como se paga
+> assinatura sem receber dinheiro.
 
 ### 4. Criar conta Resend
 1. https://resend.com → criar conta **com o email que você quer receber o feedback**
 2. `API Keys` → `Create API Key` → permissão `Sending access`
 3. Salvar:
 ```
-echo 're_...' > ~/.valdez-resend && chmod 600 ~/.valdez-resend
+cat > ~/.valdez-resend <<'EOF'
+KEY=re_...
+TO=seu@email.com
+EOF
+chmod 600 ~/.valdez-resend
 ```
-Me diz `resend pronto`. Eu ligo o `/feedback` no email.
+Me diz `resend pronto`. O envio **já está escrito** — é só a env var. Sem a
+chave, o `/feedback` continua gravando no banco e simplesmente não manda email.
 
-### 5. Discord OAuth (só depois do 1 e do 2)
+### 5. Discord OAuth (só depois do 2)
 1. https://discord.com/developers/applications → app `1365865955925819546`
 2. **OAuth2** → `Add Redirect` → colar a callback do Supabase **novo**
    (te passo a URL exata quando o passo 2 estiver pronto)
@@ -140,6 +167,28 @@ os arquivos.
 - Categorias **ficam no `/help`** (sua resposta 7).
 - Vitalício **R$ 150** (sua resposta 9).
 - `docker prune` cancelado — você já liberou espaço.
+- `/assinatura` e o aviso de vencimento levam direto pro checkout, não pra
+  landing.
+
+---
+
+## ESCRITO, ESPERANDO SÓ A CHAVE
+
+Nada aqui é trabalho pendente meu — é código pronto, compilando, commitado.
+
+| Arquivo | O que faz | Falta |
+|---|---|---|
+| `supabase/005_billing.sql` | tabelas de assinatura, idempotência do webhook, RPC `my_guilds` | rodar no projeto novo (passo 2) |
+| `supabase/functions/valdez-checkout/` | cria a cobrança na Woovi, preço decidido no servidor | AppID (passo 3) |
+| `supabase/functions/valdez-woovi-webhook/` | dinheiro recebido vira licença ativa | secret HMAC (passo 3) |
+| `src/modules/mailer.ts` | `/feedback` chega por email | chave Resend (passo 4) |
+| `valdez-site` `/assinar` | login Discord, escolhe servidor, paga por Pix | passos 2, 3 e 5 |
+
+Uma coisa **de propósito** não foi ligada: os botões "Assinar o X" da landing
+ainda levam pro convite do bot, não pro `/assinar`. Enquanto a Woovi não tem
+AppID, o checkout responde erro — mandar o cliente pra lá seria trocar um
+convite que funciona por uma tela que quebra. Viro a chave no mesmo dia em que
+você me passar o `woovi pronto`.
 
 ---
 
@@ -147,9 +196,8 @@ os arquivos.
 
 | Item | Destravado por |
 |---|---|
-| Migração do Supabase | você fazer o passo 2 |
-| Cobrança recorrente Woovi + webhook | passo 3 |
-| Email do `/feedback` | passo 4 |
+| Migração do Supabase | passo 2 |
+| Ligar cobrança Woovi + webhook | passo 3 |
+| Ligar email do `/feedback` | passo 4 |
 | Migração pra Vercel | passo 1 |
-| Login com Discord | passos 1, 2 e 5 |
-| Cadastro de usuário no site | login com Discord |
+| Login com Discord | passos 2 e 5 |
