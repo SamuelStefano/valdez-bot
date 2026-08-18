@@ -12,7 +12,7 @@ import {
 } from '../modules/licensing';
 import type { MusicTier } from '../modules/licensing';
 import { formatLabel } from '../modules/clipPublisher';
-import { config } from '../config';
+import { checkoutUrl, config } from '../config';
 
 // Sem toLocaleString de propósito: o valor proporcional tem centavos e o
 // container não garante ICU completo.
@@ -126,7 +126,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   embed.setFooter({
     text: config.siteUrl ? 'Assine no site — leva 1 minuto por Pix.' : 'Fale com o dono do bot para assinar.',
   });
-  if (config.siteUrl) embed.setURL(config.siteUrl);
+  if (config.siteUrl) embed.setURL(checkoutUrl());
 
   await interaction.reply({ embeds: [embed], ephemeral: true });
 }

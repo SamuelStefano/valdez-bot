@@ -2,7 +2,7 @@ import { Client, EmbedBuilder } from 'discord.js';
 import { getLicense, PLANS, founderSlotsLeft } from './licensing';
 import { resolveNoticeChannel } from './noticeChannel';
 import { track } from './telemetry';
-import { config } from '../config';
+import { checkoutUrl, config } from '../config';
 import { logger } from '../utils/logger';
 
 // Um aviso por processo por servidor: a avaliação de presença roda a cada
@@ -38,7 +38,7 @@ export async function announceExpired(client: Client, guildId: string): Promise<
       text: slots > 0 ? `Restam ${slots} vagas de fundador a R$ 10 para sempre.` : 'Use /assinatura para reativar.',
     });
 
-  if (config.siteUrl) embed.setURL(config.siteUrl);
+  if (config.siteUrl) embed.setURL(checkoutUrl());
 
   try {
     await channel.send({ embeds: [embed] });

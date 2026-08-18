@@ -31,3 +31,10 @@ export const config = {
     market: process.env.SPOTIFY_MARKET || 'BR',
   },
 };
+
+// A landing vende; quem já decidiu precisa cair direto no checkout. O SITE_URL
+// termina com barra no GitHub Pages e sem barra na Vercel — normalizar aqui
+// evita o //assinar que o roteador do site trata como rota desconhecida.
+export function checkoutUrl(): string {
+  return `${(config.siteUrl ?? '').replace(/\/+$/, '')}/assinar`;
+}
