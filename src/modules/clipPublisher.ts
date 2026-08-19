@@ -30,8 +30,9 @@ const CLIP_COLOR = 0xff4d4d;
 
 export function formatLabel(seconds: number): string {
   if (seconds < 60) return `${seconds}s`;
-  const min = seconds / 60;
-  return `${Number.isInteger(min) ? min : min.toFixed(1)} min`;
+  const min = Math.floor(seconds / 60);
+  const rest = seconds % 60;
+  return rest === 0 ? `${min} min` : `${min} min ${rest}s`;
 }
 
 // Teto de duração pelo limite de anexo do servidor: pedir 15 min num servidor
