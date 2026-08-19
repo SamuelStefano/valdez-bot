@@ -22,6 +22,26 @@ if (!fs.existsSync(RECORDINGS_DIR)) {
   fs.mkdirSync(RECORDINGS_DIR, { recursive: true });
 }
 
+// Export interrompido (ffmpeg morto, container reiniciado) deixa mp3/mp4 pela
+// metade que ninguém mais referencia. Sem esta varredura o volume só cresce até
+// encher, e aí toda exportação passa a falhar.
+export function sweepOrphanRecordings(maxAgeMs = 3600_000): void {
+  const cutoff = Date.now() - maxAgeMs;
+  let removed = 0;
+  for (const name of fs.readdirSync(RECORDINGS_DIR)) {
+    const file = path.join(RECORDINGS_DIR, name);
+    try {
+      if (fs.statSync(file).mtimeMs < cutoff) {
+        fs.unlinkSync(file);
+        removed++;
+      }
+    } catch {
+      /* sumiu no meio da varredura */
+    }
+  }
+  if (removed > 0) logger.info(`[CLIP] ${removed} arquivo(s) órfão(s) removido(s)`);
+}
+
 // Opus decoder: 48kHz stereo
 let OpusScript: any;
 try {

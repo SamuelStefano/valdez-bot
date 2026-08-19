@@ -92,8 +92,10 @@ export function startYtHealthWatchdog(discordClient: Client): void {
   client = discordClient;
 
   const check = async () => {
-    const { ytInfo } = await import('../utils/ytdlp');
     try {
+      // O import fica dentro do try: uma falha ao carregar o módulo derrubava o
+      // próprio watchdog, que é justamente quem deveria avisar do problema.
+      const { ytInfo } = await import('../utils/ytdlp');
       await ytInfo(CANARY_URL);
       reportWorking();
     } catch (err: any) {
@@ -104,5 +106,5 @@ export function startYtHealthWatchdog(discordClient: Client): void {
   };
 
   void check();
-  setInterval(check, CHECK_INTERVAL_MS).unref();
+  setInterval(() => void check(), CHECK_INTERVAL_MS).unref();
 }

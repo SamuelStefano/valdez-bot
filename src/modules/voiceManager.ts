@@ -217,7 +217,9 @@ export function startVoiceWatchdog(client: Client): void {
         logger.warn(
           `[VOICE] ${guildId}: watchdog — no audio for ${Math.round(idleMs / 1000)}s with ${humans} present, forcing rejoin`
         );
-        void leaveChannel(client, guildId).then(() => joinChannel(client, guildId));
+        void leaveChannel(client, guildId)
+          .then(() => joinChannel(client, guildId))
+          .catch((err: any) => logger.error(`[VOICE] ${guildId}: rejoin falhou: ${err?.message}`));
       }
     }
   }, WATCHDOG_TICK_MS);

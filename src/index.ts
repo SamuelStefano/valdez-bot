@@ -30,6 +30,7 @@ import { initMusicModal, handleMusicButton } from './modules/musicModal';
 import { handleClipButton } from './modules/clipPublisher';
 import { logSpotifyStatus } from './utils/spotifyApi';
 import { startHealthServer, startHeartbeat } from './utils/health';
+import { sweepOrphanRecordings } from './utils/audioExporter';
 import { startSupabaseSync } from './modules/supabaseSync';
 import { startWeeklyRecap } from './modules/weeklyRecap';
 import { startYtHealthWatchdog } from './modules/ytHealth';
@@ -140,6 +141,8 @@ client.once('ready', async () => {
   startSupabaseSync(client);
   startWeeklyRecap(client);
   startYtHealthWatchdog(client);
+  sweepOrphanRecordings();
+  setInterval(sweepOrphanRecordings, 3600_000).unref();
 });
 
 client.on('guildCreate', async (guild) => {

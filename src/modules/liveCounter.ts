@@ -1,4 +1,4 @@
-import { Client, EmbedBuilder, Message, TextChannel } from 'discord.js';
+import { Client, EmbedBuilder, Guild, Message, PermissionFlagsBits, TextChannel } from 'discord.js';
 import { getSettings } from './guildSettings';
 import { limits, isActive } from './licensing';
 import { listActiveSessions, formatDuration } from './voiceTracker';
@@ -23,9 +23,22 @@ function resolveTextChannel(client: Client, guildId: string): TextChannel | null
 
   const clipsChannelId = getSettings(guildId).clipsChannelId;
   const clips = clipsChannelId ? guild.channels.cache.get(clipsChannelId) : null;
-  if (clips?.isTextBased()) return clips as TextChannel;
+  if (clips?.isTextBased() && writable(guild.members.me, clips as TextChannel)) return clips as TextChannel;
 
-  return guild.systemChannel ?? null;
+  const system = guild.systemChannel;
+  return system && writable(guild.members.me, system) ? system : null;
+}
+
+// O canal de sistema costuma ser fechado pro bot: sem checar, toda call abria com
+// um 403 no log e nenhum contador na tela.
+function writable(me: Guild['members']['me'], channel: TextChannel): boolean {
+  if (!me) return false;
+  const perms = channel.permissionsFor(me);
+  return (
+    !!perms?.has(PermissionFlagsBits.ViewChannel) &&
+    perms.has(PermissionFlagsBits.SendMessages) &&
+    perms.has(PermissionFlagsBits.EmbedLinks)
+  );
 }
 
 function render(client: Client, guildId: string, counter: Counter, closed: boolean): EmbedBuilder {
@@ -74,9 +87,19 @@ function enabled(guildId: string): boolean {
   return getSettings(guildId).liveCounter && limits(guildId).stats && isActive(guildId);
 }
 
+// A trava entra antes do await do send: duas pessoas entrando na call dentro do
+// tempo de ida e volta do Discord postavam dois contadores, e o primeiro ficava
+// congelado no canal pra sempre.
+const opening = new Set<string>();
+
 async function open(client: Client, guildId: string, voiceChannelId: string): Promise<void> {
+  if (opening.has(guildId) || counters.has(guildId)) return;
+  opening.add(guildId);
   const channel = resolveTextChannel(client, guildId);
-  if (!channel) return;
+  if (!channel) {
+    opening.delete(guildId);
+    return;
+  }
 
   const counter: Counter = {
     message: null as unknown as Message,
@@ -89,6 +112,8 @@ async function open(client: Client, guildId: string, voiceChannelId: string): Pr
     counters.set(guildId, counter);
   } catch (err: any) {
     logger.warn(`[COUNTER] ${guildId}: não consegui postar: ${err?.message}`);
+  } finally {
+    opening.delete(guildId);
   }
 }
 
@@ -158,4 +183,5 @@ export function stopLiveCounter(client: Client, guildId: string): void {
 
 export function dropGuildCounter(guildId: string): void {
   counters.delete(guildId);
+  opening.delete(guildId);
 }

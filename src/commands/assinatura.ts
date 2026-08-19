@@ -38,8 +38,11 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     return;
   }
 
-  const license = getLicense(guildId);
+  // limits() roda o isActive() que vira a licença vencida pra `expired`. Lendo a
+  // licença antes disso, o embed mostrava "✅ Ativo — restam 0 dia(s)" logo abaixo
+  // de "Plano: Grátis".
   const plan = limits(guildId);
+  const license = getLicense(guildId);
   const restam = daysLeft(license);
   const slots = founderSlotsLeft();
 

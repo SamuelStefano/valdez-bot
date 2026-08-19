@@ -90,12 +90,13 @@ async function tick(client: Client): Promise<void> {
   if (now.getDay() !== 1 || now.getHours() < POST_HOUR) return;
 
   for (const guild of client.guilds.cache.values()) {
-    if (!limits(guild.id).weeklyRecap || !isActive(guild.id)) continue;
-    // O marcador é um evento no banco, não memória: restart de container numa
-    // segunda à tarde repostaria a retrospectiva em todos os servidores.
-    if (alreadyPosted(guild.id)) continue;
-
+    // O try cobre a checagem também: uma exceção fora dele abortava a segunda
+    // inteira, e todos os servidores da fila ficavam sem retrospectiva.
     try {
+      if (!limits(guild.id).weeklyRecap || !isActive(guild.id)) continue;
+      // O marcador é um evento no banco, não memória: restart de container numa
+      // segunda à tarde repostaria a retrospectiva em todos os servidores.
+      if (alreadyPosted(guild.id)) continue;
       await publish(guild);
     } catch (err: any) {
       logger.warn(`[WEEKLY] ${guild.id}: falha ao postar: ${err?.message}`);
@@ -104,6 +105,17 @@ async function tick(client: Client): Promise<void> {
 }
 
 export function startWeeklyRecap(client: Client): void {
-  setInterval(() => void tick(client), CHECK_INTERVAL_MS);
+  // Uma rodada lenta atravessando o intervalo faria duas varreduras lerem o mesmo
+  // "ainda não postei" e a retrospectiva sair duplicada.
+  let running = false;
+  setInterval(() => {
+    if (running) return;
+    running = true;
+    tick(client)
+      .catch((err: any) => logger.warn(`[WEEKLY] rodada falhou: ${err?.message}`))
+      .finally(() => {
+        running = false;
+      });
+  }, CHECK_INTERVAL_MS);
   logger.info('[WEEKLY] retrospectiva semanal agendada (segunda, 12h)');
 }

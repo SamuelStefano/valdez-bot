@@ -31,37 +31,33 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     return;
   }
 
+  // O fetch do membro é REST e pode passar dos 3s que o Discord dá pra responder;
+  // sem o defer antes, o comando morria calado.
+  await interaction.deferReply({ ephemeral: true });
+
   // setDefaultMemberPermissions é só o padrão: o admin do servidor pode liberar o
   // comando pra qualquer cargo no painel de integrações. A checagem real é aqui.
   const member = await interaction.guild?.members.fetch(interaction.user.id).catch(() => null);
   if (!member?.permissionsIn(interaction.channelId).has(PermissionFlagsBits.ManageMessages)) {
-    await interaction.reply({
-      content: '❌ Você precisa da permissão **Gerenciar mensagens** neste canal.',
-      ephemeral: true,
-    });
+    await interaction.editReply('❌ Você precisa da permissão **Gerenciar mensagens** neste canal.');
     return;
   }
 
   const channel = interaction.channel;
   if (!channel || !channel.isTextBased() || channel.isDMBased()) {
-    await interaction.reply({ content: '❌ Só consigo limpar canais de texto.', ephemeral: true });
+    await interaction.editReply('❌ Só consigo limpar canais de texto.');
     return;
   }
 
   const me = interaction.guild?.members.me;
   if (!me?.permissionsIn(channel.id).has(PermissionFlagsBits.ManageMessages)) {
-    await interaction.reply({
-      content: '❌ Não tenho permissão de **Gerenciar mensagens** aqui. Peça pro admin liberar.',
-      ephemeral: true,
-    });
+    await interaction.editReply(
+      '❌ Não tenho permissão de **Gerenciar mensagens** aqui. Peça pro admin liberar.'
+    );
     return;
   }
 
   const requested = interaction.options.getInteger('quantidade', true);
-
-  // Efêmero de propósito: quem está no canal vê as mensagens sumirem, não precisa
-  // ver também um aviso do bot ocupando o lugar delas.
-  await interaction.deferReply({ ephemeral: true });
 
   try {
     const deleted = await (channel as TextChannel).bulkDelete(requested, true);
@@ -74,9 +70,11 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       return;
     }
 
+    // Faltar mensagem quase sempre é canal com menos histórico que o pedido; a
+    // regra dos 14 dias é a exceção, e culpá-la sempre era informação falsa.
     const sobra =
       deleted.size < requested
-        ? '\n*As demais têm mais de 14 dias e o Discord não deixa apagar em lote.*'
+        ? '\n*O canal não tinha mais que isso, ou as demais passam de 14 dias.*'
         : '';
     await interaction.editReply(
       `🧹 Apaguei **${deleted.size}** ${deleted.size === 1 ? 'mensagem' : 'mensagens'}.${sobra}`

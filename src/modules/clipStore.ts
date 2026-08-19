@@ -7,7 +7,11 @@ import { Timeline } from '../utils/videoExporter';
 import { logger } from '../utils/logger';
 
 const TTL_MS = 10 * 60_000;
-const MAX_ENTRIES = 6;
+const MAX_PER_GUILD = 6;
+
+// O upload do anexo acontece depois do storeClip. Sem esta carência, uma rajada
+// de clips apagava do disco o mp3 que ainda estava subindo — em outro servidor.
+const EVICTION_GRACE_MS = 90_000;
 
 export interface PendingClip {
   id: string;
@@ -47,13 +51,23 @@ function sweep(): void {
       discard(clip);
     }
   }
-  // A VPS é compartilhada com as calls ao vivo: um teto duro de entradas impede
-  // que uma rajada de /clip encha o disco antes do TTL vencer.
-  while (clips.size > MAX_ENTRIES) {
-    const oldest = clips.keys().next().value!;
-    const clip = clips.get(oldest)!;
-    clips.delete(oldest);
-    discard(clip);
+  // O teto é por servidor: quando era global, uma rajada de /clip num servidor
+  // expulsava o clip de outro e os botões dele passavam a responder "expirou".
+  const byGuild = new Map<string, PendingClip[]>();
+  for (const clip of clips.values()) {
+    const list = byGuild.get(clip.guildId) ?? [];
+    list.push(clip);
+    byGuild.set(clip.guildId, list);
+  }
+  const grace = Date.now() - EVICTION_GRACE_MS;
+  for (const list of byGuild.values()) {
+    const evictable = list.filter((c) => c.createdAt < grace);
+    while (list.length > MAX_PER_GUILD && evictable.length > 0) {
+      const oldest = evictable.shift()!;
+      list.splice(list.indexOf(oldest), 1);
+      clips.delete(oldest.id);
+      discard(oldest);
+    }
   }
 }
 

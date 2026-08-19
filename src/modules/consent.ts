@@ -21,8 +21,16 @@ export async function showRecordingIndicator(client: Client, guildId: string): P
   const current = me.nickname ?? me.user.username;
   if (current.startsWith(REC_PREFIX)) return true;
 
+  // Cortar o resultado em 32 destruía o apelido original: ao tirar o [REC] o que
+  // voltava era o nome já truncado, e a perda era definitiva.
+  const room = 32 - REC_PREFIX.length;
+  if (current.length > room) {
+    logger.warn(`[CONSENT] ${guildId}: apelido longo demais pro [REC] — buffer não será ligado`);
+    return false;
+  }
+
   try {
-    await me.setNickname(`${REC_PREFIX}${current}`.slice(0, 32));
+    await me.setNickname(`${REC_PREFIX}${current}`);
     return true;
   } catch (err: any) {
     logger.warn(`[CONSENT] ${guildId}: falha ao marcar apelido: ${err?.message}`);
