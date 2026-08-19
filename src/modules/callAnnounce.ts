@@ -15,6 +15,10 @@ const MIN_STAY_SECONDS = 60;
 
 const lastAnnounced = new Map<string, number>();
 
+// "A call acabou" não passa pelo debounce por usuário: quem entra e sai sozinho
+// repetidas vezes dispararia o encerramento a cada saída.
+const lastEnded = new Map<string, number>();
+
 // O horário de entrada é guardado aqui em vez de vir do voiceTracker: os dois
 // escutam o mesmo evento e o tracker já apagou a sessão quando este handler roda.
 const joinedAt = new Map<string, number>();
@@ -94,6 +98,8 @@ export function setupCallAnnounce(client: Client): void {
 
     if (remaining === 0) {
       lastAnnounced.delete(key);
+      if (Date.now() - (lastEnded.get(guildId) ?? 0) < DEBOUNCE_MS) return;
+      lastEnded.set(guildId, Date.now());
       void say(client, guildId, `💤 A call acabou. **${name}** foi o último a sair.`);
       return;
     }
@@ -107,6 +113,7 @@ export function setupCallAnnounce(client: Client): void {
 
 export function dropGuildAnnounce(guildId: string): void {
   const prefix = `${guildId}:`;
+  lastEnded.delete(guildId);
   for (const key of lastAnnounced.keys()) {
     if (key.startsWith(prefix)) {
       lastAnnounced.delete(key);

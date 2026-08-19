@@ -1,6 +1,7 @@
 import { Client, PermissionFlagsBits } from 'discord.js';
 import { logger } from '../utils/logger';
-import { config } from '../config';
+import { limits } from './licensing';
+import { formatLabel } from './clipPublisher';
 
 // Gravar voz sem aviso visível é indefensável — e é o que o bot fazia. O padrão
 // aqui é o do Craig: o indicador no apelido é condição para bufferizar. Se o bot
@@ -45,10 +46,10 @@ export async function announceBuffering(client: Client, guildId: string, channel
   const channel = client.guilds.cache.get(guildId)?.channels.cache.get(channelId);
   if (!channel?.isTextBased()) return;
 
-  const minutes = Math.round(config.replayBufferSeconds / 60);
+  const window = formatLabel(limits(guildId).bufferSeconds);
   try {
     await channel.send(
-      `🔴 **Buffer de clip ligado.** Os últimos **${minutes} min** de voz ficam na memória do bot ` +
+      `🔴 **Buffer de clip ligado.** Os últimos **${window}** de voz ficam na memória do bot ` +
         `para quem pedir um clip, e são descartados continuamente — nada é gravado em disco sem alguém pedir.\n` +
         `Não quer ser capturado? \`/privacidade optout\` — sua voz deixa de entrar no buffer na hora.`
     );

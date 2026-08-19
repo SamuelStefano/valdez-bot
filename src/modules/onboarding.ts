@@ -1,6 +1,7 @@
 import { ChannelType, EmbedBuilder, Guild, PermissionFlagsBits, TextChannel } from 'discord.js';
 import { logger } from '../utils/logger';
-import { config } from '../config';
+import { limits } from './licensing';
+import { formatLabel } from './clipPublisher';
 
 // Primeiro canal de texto onde o bot consegue falar. Sem isso o admin entra num
 // servidor mudo e não descobre que precisa rodar /config.
@@ -26,7 +27,7 @@ export async function sendOnboarding(guild: Guild): Promise<void> {
     return;
   }
 
-  const minutes = Math.round(config.replayBufferSeconds / 60);
+  const window = formatLabel(limits(guild.id).bufferSeconds);
   const embed = new EmbedBuilder()
     .setColor(0xff4d4d)
     .setTitle('👋 Valdez chegou')
@@ -37,7 +38,7 @@ export async function sendOnboarding(guild: Guild): Promise<void> {
     .addFields(
       { name: '1. Configurar', value: '`/config canal` — o canal de voz que eu acompanho', inline: false },
       { name: '2. Onde postar', value: '`/config clips` — o canal de texto dos clips (opcional)', inline: false },
-      { name: '3. Usar', value: `\`/clip\` — salva os últimos minutos (até ${minutes})`, inline: false },
+      { name: '3. Usar', value: `\`/clip\` — salva os últimos minutos (até ${window})`, inline: false },
       {
         name: 'Privacidade',
         value:

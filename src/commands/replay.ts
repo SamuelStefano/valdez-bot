@@ -64,10 +64,17 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       return;
     }
 
+    // O id é lido antes do defer: `active` é o Map vivo do buffer, e uma queda de
+    // conexão ou um segundo /replay stop no meio do await o esvaziam.
+    const sessionId = active.keys().next().value;
+    const startedAt = sessionId ? active.get(sessionId)?.startedAt : undefined;
+    if (!sessionId || startedAt === undefined) {
+      await interaction.reply({ content: '⚠️ Nenhuma gravação em andamento.', ephemeral: true });
+      return;
+    }
+
     await interaction.deferReply();
 
-    const sessionId = active.keys().next().value!;
-    const startedAt = active.get(sessionId)!.startedAt;
     const packets = stopRecording(guildId, sessionId);
 
     if (!packets || packets.size === 0) {

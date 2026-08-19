@@ -62,7 +62,27 @@ function pickBitrate(seconds: number, limitBytes: number): number {
  * Decode Opus packets to raw PCM, then re-encode to MP3 via ffmpeg.
  * Discord sends 48kHz stereo Opus at 20ms frames (960 samples per channel).
  */
-export async function exportClip(
+// Uma exportação de 15 min segura ~345 MB de PCM mais o buffer de saída. O
+// container tem 1 GB: duas ao mesmo tempo (dois /clip, ou um /clip e um momento
+// automático) derrubam o bot em todos os servidores. A fila serializa em vez de
+// recusar, porque quem pediu o clip espera o arquivo, não um erro.
+let exportChain: Promise<unknown> = Promise.resolve();
+
+export function exportClip(
+  packets: Map<string, OpusPacket[]>,
+  filename: string,
+  seconds: number,
+  limitBytes: number
+): Promise<string> {
+  const next = exportChain.then(
+    () => runExport(packets, filename, seconds, limitBytes),
+    () => runExport(packets, filename, seconds, limitBytes)
+  );
+  exportChain = next.catch(() => undefined);
+  return next;
+}
+
+async function runExport(
   packets: Map<string, OpusPacket[]>,
   filename: string,
   seconds: number,
@@ -79,8 +99,7 @@ export async function exportClip(
   }
 
   if (!OpusScript) {
-    allPackets.sort((a, b) => a.timestamp - b.timestamp);
-    return exportRawFallback(allPackets, filename);
+    throw new Error('opusscript indisponível — sem decoder não dá pra exportar');
   }
 
   const pcmBuffer = mixToPcm(packets, allPackets);
@@ -117,15 +136,17 @@ export async function exportClip(
         logger.info(`Exported audio: ${outputPath} (${size} bytes)`);
         resolve(outputPath);
       } else {
+        // O fallback antigo gravava Opus cru com nome .mp3: o usuário baixava um
+        // arquivo que não toca em lugar nenhum e achava que o bot funcionou.
         logger.error(`ffmpeg failed (code ${code}): ${stderrLog.slice(-500)}`);
-        exportRawFallback(allPackets, filename).then(resolve).catch(reject);
+        reject(new Error(`ffmpeg saiu com código ${code}`));
       }
     });
 
     ffmpeg.on('error', (err) => {
       clearTimeout(timeout);
       logger.error(`ffmpeg error: ${err.message}`);
-      exportRawFallback(allPackets, filename).then(resolve).catch(reject);
+      reject(err);
     });
 
     // EPIPE quando o ffmpeg morre antes de consumir tudo: sem listener isso sobe
@@ -250,16 +271,4 @@ export async function exportWaveform(audioPath: string): Promise<string | null> 
   });
 }
 
-/**
- * Fallback: save raw Opus packet data concatenated
- */
-async function exportRawFallback(
-  allPackets: OpusPacket[],
-  filename: string
-): Promise<string> {
-  const outputPath = path.join(RECORDINGS_DIR, `${filename}.raw`);
-  const rawData = Buffer.concat(allPackets.map(p => p.data));
-  fs.writeFileSync(outputPath, rawData);
-  logger.info(`Exported raw audio fallback: ${outputPath} (${rawData.length} bytes)`);
-  return outputPath;
-}
+

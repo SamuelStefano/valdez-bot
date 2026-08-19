@@ -7,6 +7,7 @@ import {
   ChatInputCommandInteraction,
   EmbedBuilder,
   Guild,
+  PermissionFlagsBits,
   TextChannel,
 } from 'discord.js';
 import fs from 'fs';
@@ -51,12 +52,27 @@ function participantsField(guild: Guild | null, userIds: string[]): string {
   return `${names.slice(0, 8).join(', ')} +${names.length - 8}`;
 }
 
+// Sem checar permissão o send estoura, a resposta deferida nunca é resolvida e o
+// admin fica olhando "pensando..." sem saber que o canal que ele escolheu é
+// fechado pro bot.
 function resolveClipsChannel(guild: Guild | null): TextChannel | null {
   if (!guild) return null;
   const clipsChannelId = getSettings(guild.id).clipsChannelId;
   if (!clipsChannelId) return null;
   const channel = guild.channels.cache.get(clipsChannelId);
-  return channel?.isTextBased() ? (channel as TextChannel) : null;
+  if (!channel?.isTextBased()) return null;
+  const me = guild.members.me;
+  const perms = me ? channel.permissionsFor(me) : null;
+  if (
+    !perms?.has(PermissionFlagsBits.ViewChannel) ||
+    !perms.has(PermissionFlagsBits.SendMessages) ||
+    !perms.has(PermissionFlagsBits.AttachFiles) ||
+    !perms.has(PermissionFlagsBits.EmbedLinks)
+  ) {
+    logger.warn(`[CLIP] ${guild.id}: sem permissão no canal de clips ${clipsChannelId}`);
+    return null;
+  }
+  return channel as TextChannel;
 }
 
 // O avatar e o apelido só existem no cliente do Discord. Buscar o membro é o que
@@ -185,6 +201,11 @@ export async function publishClip(
     } else {
       await interaction.editReply({ content: '', embeds: [embed], files, components });
     }
+  } catch (err: any) {
+    logger.error(`[CLIP] ${interaction.guildId}: envio falhou: ${err?.message}`);
+    await interaction
+      .editReply('❌ Não consegui postar o clip. Confira se eu posso enviar mensagens e anexos no canal.')
+      .catch(() => {});
   } finally {
     if (wavePath) {
       setTimeout(() => {
@@ -210,9 +231,12 @@ async function sendAudio(interaction: ButtonInteraction, clip: PendingClip): Pro
     await replyGone(interaction);
     return;
   }
+  // O upload é a resposta inicial, e o Discord fecha a interação em 3s: qualquer
+  // mp3 que demore mais que isso pra subir virava "interação falhou" e nada mais.
+  await interaction.deferReply();
   const size = fs.statSync(clip.audioPath).size;
   const embed = clipEmbed(clip, interaction.guild, size);
-  await interaction.reply({
+  await interaction.editReply({
     embeds: [embed],
     files: [
       new AttachmentBuilder(clip.audioPath, {
@@ -227,8 +251,9 @@ async function sendVideo(interaction: ButtonInteraction, clip: PendingClip): Pro
   const limit = maxUploadBytes(Number(interaction.guild?.premiumTier ?? 0));
 
   if (clip.videoPath && fs.existsSync(clip.videoPath)) {
+    await interaction.deferReply();
     const size = fs.statSync(clip.videoPath).size;
-    await interaction.reply({
+    await interaction.editReply({
       embeds: [clipEmbed(clip, interaction.guild, size)],
       files: [
         new AttachmentBuilder(clip.videoPath, {

@@ -1,11 +1,12 @@
 import { ChatInputCommandInteraction, SlashCommandBuilder, EmbedBuilder } from 'discord.js';
 import { dbStatements } from '../utils/database';
-import { formatDuration } from '../modules/voiceTracker';
+import { formatDuration, listActiveSessions } from '../modules/voiceTracker';
 import { progressFor } from '../modules/xp';
 
 export const data = new SlashCommandBuilder()
   .setName('leaderboard')
   .setDescription('Ranking de horas em call')
+  .setDMPermission(false)
   .addStringOption(opt =>
     opt
       .setName('periodo')
@@ -36,17 +37,36 @@ function startOfMonth(): number {
 
 const TITLE_SUFFIX: Record<string, string> = { week: ' (Semana)', month: ' (Mês)' };
 
+// A consulta só soma sessões fechadas. Sem isto quem está na call agora aparece
+// com o tempo congelado de quando entrou — o ranking fica errado exatamente
+// enquanto as pessoas estão olhando pra ele.
+function withLiveTime(guildId: string, rows: any[], since: number): any[] {
+  const now = Math.floor(Date.now() / 1000);
+  const byUser = new Map(rows.map((r) => [r.user_id, { ...r }]));
+  for (const { userId, joinedAt } of listActiveSessions(guildId)) {
+    const extra = now - Math.max(joinedAt, since);
+    if (extra <= 0) continue;
+    const existing = byUser.get(userId);
+    if (existing) existing.total_seconds += extra;
+  }
+  return [...byUser.values()].sort((a, b) => b.total_seconds - a.total_seconds);
+}
+
 export async function execute(interaction: ChatInputCommandInteraction) {
   const period = interaction.options.getString('periodo') || 'total';
-  const guildId = interaction.guildId!;
+  const guildId = interaction.guildId;
+  if (!guildId) {
+    await interaction.reply({ content: '❌ Use este comando dentro de um servidor.', ephemeral: true });
+    return;
+  }
 
   let rows: any[];
 
   if (period === 'week' || period === 'month') {
     const since = period === 'week' ? startOfWeek() : startOfMonth();
-    rows = dbStatements.getLeaderboardSince.all(guildId, since) as any[];
+    rows = withLiveTime(guildId, dbStatements.getLeaderboardSince.all(guildId, since) as any[], since);
   } else {
-    rows = dbStatements.getLeaderboard.all(guildId) as any[];
+    rows = withLiveTime(guildId, dbStatements.getLeaderboard.all(guildId) as any[], 0);
   }
 
   if (rows.length === 0) {

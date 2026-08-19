@@ -43,12 +43,17 @@ async function request(path: string, init: RequestInit): Promise<Response> {
   return res;
 }
 
-async function upsert(table: string, rows: unknown[], onConflict?: string): Promise<void> {
+async function upsert(
+  table: string,
+  rows: unknown[],
+  onConflict?: string,
+  resolution: 'merge-duplicates' | 'ignore-duplicates' = 'merge-duplicates'
+): Promise<void> {
   if (rows.length === 0) return;
   const qs = onConflict ? `?on_conflict=${onConflict}` : '';
   await request(`${table}${qs}`, {
     method: 'POST',
-    headers: headers({ Prefer: 'resolution=merge-duplicates,return=minimal' }),
+    headers: headers({ Prefer: `resolution=${resolution},return=minimal` }),
     body: JSON.stringify(rows),
   });
 }
@@ -90,7 +95,10 @@ async function pushGuilds(client: Client): Promise<void> {
       expires_at: iso(l.expiresAt),
       updated_at: new Date().toISOString(),
     }));
-  await upsert('licenses', licenses, 'guild_id');
+  // ignore-duplicates: quem manda na licença é o webhook de pagamento, que grava
+  // direto no Supabase. Com merge, uma renovação era desfeita no tick seguinte —
+  // o bot subia a linha local ainda vencida por cima do pagamento aprovado.
+  await upsert('licenses', licenses, 'guild_id', 'ignore-duplicates');
 }
 
 async function pushEvents(): Promise<void> {
@@ -200,17 +208,28 @@ async function pruneHeartbeats(): Promise<void> {
   });
 }
 
+// Cada etapa isolada: antes um 4xx no push de guilds abortava a rodada inteira e
+// o pull de licenças — de onde vem o pagamento — nunca mais rodava.
+async function step(name: string, fn: () => Promise<void>): Promise<void> {
+  try {
+    await fn();
+  } catch (err: any) {
+    logger.warn(`[SYNC] ${name} falhou: ${err?.message}`);
+  }
+}
+
 async function runOnce(client: Client): Promise<void> {
-  await pushGuilds(client);
-  await pushEvents();
-  await pushFeedback();
-  await pushHeartbeat(client);
-  await pullLicenses(client);
+  // A licença desce primeiro: o resto da rodada já enxerga o plano pago.
+  await step('pullLicenses', () => pullLicenses(client));
+  await step('pushGuilds', () => pushGuilds(client));
+  await step('pushEvents', pushEvents);
+  await step('pushFeedback', pushFeedback);
+  await step('pushHeartbeat', () => pushHeartbeat(client));
   dbStatements.pruneEvents.run(Math.floor(Date.now() / 1000) - RETENTION_DAYS * 86400);
 
   if (Date.now() - lastPruneAt > 6 * 3600_000) {
     lastPruneAt = Date.now();
-    await pruneHeartbeats();
+    await step('pruneHeartbeats', pruneHeartbeats);
   }
 }
 
@@ -220,12 +239,21 @@ export function startSupabaseSync(client: Client): void {
     return;
   }
 
+  // Cada etapa tem 15s de timeout, então uma rodada ruim passa do intervalo. Sem
+  // trava, duas rodadas leem o mesmo lote de eventos e o painel conta em dobro.
+  let running = false;
   const tick = () => {
-    runOnce(client).catch((err: any) => {
-      // Falha de sync não pode derrubar o bot: o SQLite segura os eventos até a
-      // próxima rodada.
-      logger.warn(`[SYNC] falhou: ${err?.message}`);
-    });
+    if (running) return;
+    running = true;
+    runOnce(client)
+      .catch((err: any) => {
+        // Falha de sync não pode derrubar o bot: o SQLite segura os eventos até a
+        // próxima rodada.
+        logger.warn(`[SYNC] falhou: ${err?.message}`);
+      })
+      .finally(() => {
+        running = false;
+      });
   };
 
   setTimeout(tick, 10_000);

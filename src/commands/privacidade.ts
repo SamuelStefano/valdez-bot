@@ -1,7 +1,8 @@
 import { ChatInputCommandInteraction, SlashCommandBuilder, EmbedBuilder } from 'discord.js';
 import { hasOptedOut, setOptOut } from '../modules/guildSettings';
 import { forgetUser, isBuffering } from '../modules/replayBuffer';
-import { config } from '../config';
+import { limits } from '../modules/licensing';
+import { formatLabel } from '../modules/clipPublisher';
 
 export const data = new SlashCommandBuilder()
   .setName('privacidade')
@@ -44,7 +45,9 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     return;
   }
 
-  const minutes = Math.round(config.replayBufferSeconds / 60);
+  // A janela é o plano do servidor, não o teto do config: dizer "15 min" pra
+  // quem tem 30s é errar por escrito justamente no texto de consentimento.
+  const window = formatLabel(limits(guildId).bufferSeconds);
   const optedOut = hasOptedOut(guildId, userId);
   const embed = new EmbedBuilder()
     .setColor(optedOut ? 0x99aab5 : 0xed4245)
@@ -52,7 +55,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     .setDescription(
       optedOut
         ? 'Você está em **opt-out**: nada da sua voz é guardado.'
-        : `Os últimos **${minutes} min** da sua voz ficam **na memória do bot** e são descartados continuamente. ` +
+        : `Os últimos **${window}** da sua voz ficam **na memória do bot** e são descartados continuamente. ` +
             'Nada vai pra disco até alguém pedir um clip.'
     )
     .addFields(
