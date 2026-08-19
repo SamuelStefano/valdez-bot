@@ -135,10 +135,28 @@ interface PublishOptions {
   kind: 'clip' | 'replay';
 }
 
+// O tempo pedido não é o tempo que existe: /clip 15min logo depois do bot entrar
+// na call produz 20s de áudio. Anunciar o pedido virava um clip rotulado "15 min"
+// com 20 segundos dentro — e ainda escolhia bitrate e limite de vídeo pelo número
+// errado.
+function realSeconds(packets: Map<string, OpusPacket[]>, requested: number): number {
+  let first = Infinity;
+  let last = 0;
+  for (const list of packets.values()) {
+    for (const p of list) {
+      if (p.timestamp < first) first = p.timestamp;
+      if (p.timestamp > last) last = p.timestamp;
+    }
+  }
+  if (!Number.isFinite(first) || last <= first) return requested;
+  return Math.min(requested, Math.max(1, Math.round((last - first) / 1000)));
+}
+
 export async function publishClip(
   interaction: ChatInputCommandInteraction,
-  { packets, seconds, kind }: PublishOptions
+  { packets, seconds: requested, kind }: PublishOptions
 ): Promise<void> {
+  const seconds = realSeconds(packets, requested);
   const label = formatLabel(seconds);
   const filename = `${kind}_${interaction.guildId}_${Date.now()}`;
   const limit = maxUploadBytes(Number(interaction.guild?.premiumTier ?? 0));
@@ -291,6 +309,12 @@ async function sendVideo(interaction: ButtonInteraction, clip: PendingClip): Pro
   await interaction.deferReply();
 
   try {
+    // Entre a checagem acima e aqui outro clique pode ter pegado a vez: sem isso
+    // o segundo usuário via "não consegui montar o vídeo" e achava que quebrou.
+    if (renderBusy()) {
+      await interaction.editReply('⏳ Já tem um vídeo renderizando. Tenta de novo em alguns segundos.');
+      return;
+    }
     const participants = await resolveParticipants(interaction.guild, clip.userIds);
     const videoPath = await exportRoomVideo(
       clip.timeline,

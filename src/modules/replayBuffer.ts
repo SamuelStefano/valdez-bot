@@ -174,6 +174,10 @@ export function startBuffering(guildId: string, connection: VoiceConnection) {
     opusStream.on('error', (err) => {
       logger.error(`[BUFFER] ${guildId}: stream error for ${userId}:`, err);
       buf.isSubscribed = false;
+      // Sem destruir, um stream que só erra fica no Set pra sempre e o
+      // EndBehaviorType.Manual nunca fecha ele sozinho.
+      g.openStreams.delete(opusStream);
+      opusStream.destroy();
     });
 
     opusStream.on('close', () => {
