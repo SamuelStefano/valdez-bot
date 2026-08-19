@@ -122,6 +122,11 @@ async function grant(guild: Guild, userId: string): Promise<void> {
   if (granted.length > 0) await announce(guild, member, level, granted);
 }
 
+export function dropGuildRewards(guildId: string): void {
+  cache.delete(guildId);
+  issues.delete(guildId);
+}
+
 export function applyRoleRewards(guild: Guild, userId: string): void {
   grant(guild, userId).catch((err: any) => {
     logger.warn(`[CARGOS] ${guild.id}: ${err?.message}`);

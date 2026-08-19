@@ -78,14 +78,13 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     return;
   }
 
-  if (seconds < requested) {
-    const motivo =
-      planCap <= seconds
-        ? `seu plano vai até ${formatLabel(planCap)} — veja \`/assinatura\``
-        : 'este servidor aceita anexos menores';
-    await interaction.editReply(`⚠️ Cortei para os últimos ${formatLabel(seconds)} (${motivo}). Gerando...`);
-  }
+  const motivo =
+    planCap <= seconds
+      ? `seu plano vai até ${formatLabel(planCap)} — veja \`/assinatura\``
+      : 'este servidor aceita anexos menores';
+  const notice =
+    seconds < requested ? `⚠️ Cortei para os últimos ${formatLabel(seconds)} (${motivo}).` : undefined;
 
   track(guildId, 'clip', { userId: interaction.user.id, seconds, detail: 'mp3' });
-  await publishClip(interaction, { packets: snapshot, seconds, kind: 'clip' });
+  await publishClip(interaction, { packets: snapshot, seconds, kind: 'clip', notice });
 }

@@ -133,6 +133,9 @@ interface PublishOptions {
   packets: Map<string, OpusPacket[]>;
   seconds: number;
   kind: 'clip' | 'replay';
+  // Vem junto da entrega em vez de virar uma edição própria: o aviso anterior era
+  // sobrescrito pelo resultado antes de qualquer um conseguir ler.
+  notice?: string;
 }
 
 // O tempo pedido não é o tempo que existe: /clip 15min logo depois do bot entrar
@@ -154,7 +157,7 @@ function realSeconds(packets: Map<string, OpusPacket[]>, requested: number): num
 
 export async function publishClip(
   interaction: ChatInputCommandInteraction,
-  { packets, seconds: requested, kind }: PublishOptions
+  { packets, seconds: requested, kind, notice }: PublishOptions
 ): Promise<void> {
   const seconds = realSeconds(packets, requested);
   const label = formatLabel(seconds);
@@ -215,9 +218,11 @@ export async function publishClip(
     const clipsChannel = resolveClipsChannel(interaction.guild);
     if (clipsChannel && clipsChannel.id !== interaction.channelId) {
       await clipsChannel.send({ embeds: [embed], files, components });
-      await interaction.editReply(`✅ Clip de ${label} postado em <#${clipsChannel.id}>.`);
+      await interaction.editReply(
+        `✅ Clip de ${label} postado em <#${clipsChannel.id}>.${notice ? `\n${notice}` : ''}`
+      );
     } else {
-      await interaction.editReply({ content: '', embeds: [embed], files, components });
+      await interaction.editReply({ content: notice ?? '', embeds: [embed], files, components });
     }
   } catch (err: any) {
     logger.error(`[CLIP] ${interaction.guildId}: envio falhou: ${err?.message}`);

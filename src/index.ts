@@ -15,6 +15,7 @@ import { setupLiveCounter, dropGuildCounter } from './modules/liveCounter';
 import { dropGuildMusic } from './modules/musicPlayer';
 import { setupCallAnnounce, dropGuildAnnounce } from './modules/callAnnounce';
 import { setupHighlightDetector, dropGuildHighlights } from './modules/highlightDetector';
+import { dropGuildRewards } from './modules/roleRewards';
 import { loadAllSettings, forgetGuild } from './modules/guildSettings';
 import {
   loadLicenses,
@@ -31,7 +32,7 @@ import { handleClipButton } from './modules/clipPublisher';
 import { logSpotifyStatus } from './utils/spotifyApi';
 import { startHealthServer, startHeartbeat } from './utils/health';
 import { sweepOrphanRecordings } from './utils/audioExporter';
-import { startSupabaseSync } from './modules/supabaseSync';
+import { startSupabaseSync, markGuildLeft } from './modules/supabaseSync';
 import { startWeeklyRecap } from './modules/weeklyRecap';
 import { startYtHealthWatchdog } from './modules/ytHealth';
 
@@ -159,11 +160,13 @@ client.on('guildCreate', async (guild) => {
 client.on('guildDelete', (guild) => {
   logger.info(`[GUILD] removido de ${guild.name} (${guild.id})`);
   track(guild.id, 'guild_leave');
+  markGuildLeft(guild.id);
   dropGuildVoice(guild.id);
   dropGuildMusic(guild.id);
   dropGuildCounter(guild.id);
   dropGuildAnnounce(guild.id);
   dropGuildHighlights(guild.id);
+  dropGuildRewards(guild.id);
   forgetGuild(guild.id);
   dropLicenseCache(guild.id);
   clearExpiredNotice(guild.id);

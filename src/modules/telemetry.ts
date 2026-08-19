@@ -1,4 +1,5 @@
 import { dbStatements } from '../utils/database';
+import { hasOptedOut } from './guildSettings';
 import { logger } from '../utils/logger';
 
 export type EventKind =
@@ -28,10 +29,13 @@ interface EventDetail {
 // cair, o painel atrasa mas nenhum evento se perde.
 export function track(guildId: string, kind: EventKind, extra: EventDetail = {}): void {
   try {
+    // Opt-out vale pro painel também: o evento continua sendo contado, mas sem o
+    // id — senão quem pediu pra sair da gravação ainda subia identificado.
+    const userId = extra.userId && !hasOptedOut(guildId, extra.userId) ? extra.userId : null;
     dbStatements.addEvent.run({
       guild_id: guildId,
       kind,
-      user_id: extra.userId ?? null,
+      user_id: userId,
       seconds: extra.seconds ?? null,
       bytes: extra.bytes ?? null,
       detail: extra.detail ?? null,

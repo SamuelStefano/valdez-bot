@@ -183,12 +183,19 @@ export const dbStatements: Record<string, Statement> = {
     GROUP BY kind
   `),
 
+  // Só o pedaço da sessão que cai dentro da call conta. Somando duration_seconds
+  // cru, quem já estava no canal horas antes do rolê começar aparecia no recap
+  // com um tempo que não foi passado ali — e ganhava os prêmios por isso.
   sessionParticipants: db.prepare(`
-    SELECT user_id, username, SUM(duration_seconds) as total_seconds,
-           MIN(joined_at) as first_join, MAX(left_at) as last_left
+    SELECT user_id, username,
+           SUM(MIN(left_at, @ended) - MAX(joined_at, @started)) as total_seconds,
+           MAX(MIN(joined_at), @started) as first_join,
+           MIN(MAX(left_at), @ended) as last_left
     FROM voice_sessions
-    WHERE guild_id = ? AND channel_id = ? AND left_at IS NOT NULL AND left_at >= ?
+    WHERE guild_id = @guild AND channel_id = @channel
+      AND left_at IS NOT NULL AND left_at >= @started AND joined_at <= @ended
     GROUP BY user_id
+    HAVING total_seconds > 0
     ORDER BY total_seconds DESC
   `),
 

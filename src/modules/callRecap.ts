@@ -46,11 +46,12 @@ async function publish(guild: Guild, call: Call, endedAt: number): Promise<void>
   const durationSeconds = endedAt - call.startedAt;
   if (durationSeconds < MIN_RECAP_SECONDS) return;
 
-  const rows = dbStatements.sessionParticipants.all(
-    guildId,
-    call.voiceChannelId,
-    call.startedAt
-  ) as ParticipantRow[];
+  const rows = dbStatements.sessionParticipants.all({
+    guild: guildId,
+    channel: call.voiceChannelId,
+    started: call.startedAt,
+    ended: endedAt,
+  }) as ParticipantRow[];
   // Call de uma pessoa só não é rolê pra ter card de resumo.
   if (rows.length < 2) return;
 

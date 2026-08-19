@@ -5,17 +5,21 @@ import { formatLabel } from './clipPublisher';
 
 // Primeiro canal de texto onde o bot consegue falar. Sem isso o admin entra num
 // servidor mudo e não descobre que precisa rodar /config.
+const NEEDED = [
+  PermissionFlagsBits.ViewChannel,
+  PermissionFlagsBits.SendMessages,
+  PermissionFlagsBits.EmbedLinks,
+];
+
 function firstWritableChannel(guild: Guild): TextChannel | null {
   const me = guild.members.me;
   if (!me) return null;
 
   const systemChannel = guild.systemChannel;
-  if (systemChannel?.permissionsFor(me)?.has(PermissionFlagsBits.SendMessages)) return systemChannel;
+  if (systemChannel?.permissionsFor(me)?.has(NEEDED)) return systemChannel;
 
   const channel = guild.channels.cache.find(
-    (c) =>
-      c.type === ChannelType.GuildText &&
-      c.permissionsFor(me)?.has(PermissionFlagsBits.SendMessages) === true
+    (c) => c.type === ChannelType.GuildText && c.permissionsFor(me)?.has(NEEDED) === true
   );
   return (channel as TextChannel) ?? null;
 }

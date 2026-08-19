@@ -73,6 +73,9 @@ async function pushGuilds(client: Client): Promise<void> {
       owner_id: guild.ownerId,
       voice_channel_id: settings.voiceChannelId,
       clips_channel_id: settings.clipsChannelId,
+      // Reinstalação limpa a saída sozinha: o servidor está no cache agora, então
+      // por definição o bot não saiu dele.
+      left_at: null,
       last_seen_at: new Date().toISOString(),
     };
   });
@@ -231,6 +234,18 @@ async function runOnce(client: Client): Promise<void> {
     lastPruneAt = Date.now();
     await step('pruneHeartbeats', pruneHeartbeats);
   }
+}
+
+// O servidor sai do cache no mesmo instante, então a próxima rodada de pushGuilds
+// nem vê a linha — sem marcar aqui, o painel guarda o servidor como ativo pra
+// sempre e a contagem de instalações só sobe.
+export function markGuildLeft(guildId: string): void {
+  if (!enabled()) return;
+  request(`guilds?guild_id=eq.${guildId}`, {
+    method: 'PATCH',
+    headers: headers({ Prefer: 'return=minimal' }),
+    body: JSON.stringify({ left_at: new Date().toISOString() }),
+  }).catch((err: any) => logger.warn(`[SYNC] markGuildLeft falhou: ${err?.message}`));
 }
 
 export function startSupabaseSync(client: Client): void {
