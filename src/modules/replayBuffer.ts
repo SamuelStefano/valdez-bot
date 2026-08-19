@@ -14,6 +14,8 @@ interface UserBuffer {
   isSubscribed: boolean;
 }
 
+type OpusStream = ReturnType<VoiceReceiver['subscribe']>;
+
 interface ActiveRecording {
   triggeredBy: string;
   startedAt: number;
@@ -29,6 +31,7 @@ interface GuildBuffer {
   trimInterval: NodeJS.Timeout | null;
   receiver: VoiceReceiver | null;
   speakingHandler: ((userId: string) => void) | null;
+  openStreams: Set<OpusStream>;
   lastActivityAt: number;
 }
 
@@ -43,6 +46,7 @@ function state(guildId: string): GuildBuffer {
       trimInterval: null,
       receiver: null,
       speakingHandler: null,
+      openStreams: new Set(),
       lastActivityAt: 0,
     };
     guilds.set(guildId, g);
@@ -109,6 +113,7 @@ export function startBuffering(guildId: string, connection: VoiceConnection) {
     const opusStream = receiver.subscribe(userId, {
       end: { behavior: EndBehaviorType.Manual },
     });
+    g.openStreams.add(opusStream);
 
     const buf = getUserBuffer(g, userId);
     buf.isSubscribed = true;
@@ -160,6 +165,7 @@ export function startBuffering(guildId: string, connection: VoiceConnection) {
     opusStream.on('close', () => {
       logger.info(`[BUFFER] ${guildId}: stream closed for ${userId}`);
       buf.isSubscribed = false;
+      g.openStreams.delete(opusStream);
     });
   };
 
@@ -180,6 +186,10 @@ export function resetBuffering(guildId: string) {
   if (g.receiver && g.speakingHandler) {
     g.receiver.speaking.off('start', g.speakingHandler);
   }
+  // Cada stream aberto segue empurrando pacotes pro UserBuffer que o clear()
+  // logo abaixo desanexa do Map — vira memória que ninguém mais lê nem libera.
+  for (const stream of g.openStreams) stream.destroy();
+  g.openStreams.clear();
   g.receiver = null;
   g.speakingHandler = null;
   g.userBuffers.clear();

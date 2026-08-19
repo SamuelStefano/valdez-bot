@@ -10,8 +10,9 @@ import {
   startVoiceWatchdog,
   dropGuildVoice,
 } from './modules/voiceManager';
-import { setupVoiceTracker } from './modules/voiceTracker';
-import { setupLiveCounter } from './modules/liveCounter';
+import { setupVoiceTracker, closeStaleSessions, markAlive } from './modules/voiceTracker';
+import { setupLiveCounter, dropGuildCounter } from './modules/liveCounter';
+import { dropGuildMusic } from './modules/musicPlayer';
 import { loadAllSettings, forgetGuild } from './modules/guildSettings';
 import {
   loadLicenses,
@@ -152,6 +153,8 @@ client.on('guildDelete', (guild) => {
   logger.info(`[GUILD] removido de ${guild.name} (${guild.id})`);
   track(guild.id, 'guild_leave');
   dropGuildVoice(guild.id);
+  dropGuildMusic(guild.id);
+  dropGuildCounter(guild.id);
   forgetGuild(guild.id);
   dropLicenseCache(guild.id);
   clearExpiredNotice(guild.id);
@@ -215,6 +218,12 @@ const healthServer = startHealthServer(client);
 
 function shutdown() {
   logger.info('Shutting down...');
+  try {
+    markAlive();
+    closeStaleSessions();
+  } catch (err: any) {
+    logger.error(`Falha ao fechar sessões no shutdown: ${err?.message}`);
+  }
   healthServer.close();
   client.destroy();
   process.exit(0);

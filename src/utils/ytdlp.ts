@@ -20,15 +20,27 @@ export interface YtInfo {
   thumbnail?: string;
 }
 
+// Sem teto, um yt-dlp travado deixa a interação do /play pendurada até o Discord
+// expirar o token — o usuário nunca recebe resposta nenhuma.
+const RUN_TIMEOUT_MS = 45_000;
+
 function runJson(args: string[]): Promise<any[]> {
   return new Promise((resolve, reject) => {
     const proc = spawn(YTDLP, args, { stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '';
     let stderr = '';
+    const timer = setTimeout(() => {
+      proc.kill('SIGKILL');
+      reject(new Error(`yt-dlp timed out after ${RUN_TIMEOUT_MS / 1000}s`));
+    }, RUN_TIMEOUT_MS);
     proc.stdout.on('data', (d) => (stdout += d.toString()));
     proc.stderr.on('data', (d) => (stderr += d.toString()));
-    proc.on('error', reject);
+    proc.on('error', (err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
     proc.on('close', (code) => {
+      clearTimeout(timer);
       if (code !== 0) {
         if (isBlockError(stderr)) reportBlocked(stderr.trim());
         return reject(new Error(`yt-dlp exited ${code}: ${stderr.trim().slice(0, 300)}`));

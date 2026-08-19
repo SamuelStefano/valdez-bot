@@ -128,7 +128,11 @@ export async function exportClip(
       exportRawFallback(allPackets, filename).then(resolve).catch(reject);
     });
 
-    // Write PCM data to ffmpeg stdin
+    // EPIPE quando o ffmpeg morre antes de consumir tudo: sem listener isso sobe
+    // como uncaughtException em vez de cair no fallback logo acima.
+    ffmpeg.stdin.on('error', (err) => {
+      logger.warn(`ffmpeg stdin: ${err.message}`);
+    });
     ffmpeg.stdin.write(pcmBuffer);
     ffmpeg.stdin.end();
   });

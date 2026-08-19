@@ -7,7 +7,7 @@ import {
   StreamType,
 } from '@discordjs/voice';
 import { logger } from '../utils/logger';
-import { getConnection, unmute, mute, setMusicActive } from './voiceManager';
+import { getConnection, unmute, mute, setMusicActive, setMusicStopper } from './voiceManager';
 import { fetchSpotifyAlbum, fetchSpotifyPlaylist, fetchSpotifyTrack, SpotifyTrack } from '../utils/spotifyApi';
 import { scResolve, scSearch, youtubeTitle, ytInfo, ytPlaylist, ytSearch, ytStream } from '../utils/ytdlp';
 
@@ -360,8 +360,21 @@ export function stop(guildId: string) {
   queue.current = null;
   queue.loop = false;
   queue.player.stop();
+  setMusicActive(guildId, false);
   mute(guildId);
   emit(guildId, 'stopped');
+}
+
+setMusicStopper(stop);
+
+// Servidor removeu o bot: sem isso a fila e o AudioPlayer ficam vivos no Map
+// pra sempre.
+export function dropGuildMusic(guildId: string): void {
+  const queue = queues.get(guildId);
+  if (!queue) return;
+  queue.player.stop();
+  queue.player.removeAllListeners();
+  queues.delete(guildId);
 }
 
 export function pause(guildId: string): boolean {

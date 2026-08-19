@@ -11,10 +11,33 @@ function sessionKey(guildId: string, userId: string) {
   return `${guildId}:${userId}`;
 }
 
-export function setupVoiceTracker(client: Client) {
-  // Close any stale sessions on startup
+const HEARTBEAT_KEY = 'last_alive';
+const HEARTBEAT_MS = 60_000;
+
+export function markAlive(): void {
+  dbStatements.setMeta.run(HEARTBEAT_KEY, Math.floor(Date.now() / 1000));
+}
+
+// Fechar sessão pendente com o horário atual credita todo o tempo que o bot
+// passou FORA do ar como tempo em call — foi o que gerou sessões de 38h no
+// ranking. O heartbeat marca o último instante em que o bot sabia quem estava
+// na call; é até ali que o tempo é real.
+export function closeStaleSessions(): void {
   const now = Math.floor(Date.now() / 1000);
-  dbStatements.closeAllSessions.run(now, now);
+  const row = dbStatements.getMeta.get(HEARTBEAT_KEY) as { value: number } | undefined;
+  const closeAt = Math.min(row?.value ?? now, now);
+  const result = dbStatements.closeAllSessions.run(closeAt, closeAt);
+  if (result.changes > 0) {
+    logger.warn(
+      `Fechadas ${result.changes} sessões órfãs em ${new Date(closeAt * 1000).toISOString()}`
+    );
+  }
+}
+
+export function setupVoiceTracker(client: Client) {
+  closeStaleSessions();
+  markAlive();
+  setInterval(markAlive, HEARTBEAT_MS).unref();
 
   client.on('voiceStateUpdate', (oldState: VoiceState, newState: VoiceState) => {
     const userId = newState.member?.id || oldState.member?.id;

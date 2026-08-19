@@ -78,6 +78,11 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_feedback_unsynced ON feedback(synced);
 
+  CREATE TABLE IF NOT EXISTS bot_meta (
+    key TEXT PRIMARY KEY,
+    value INTEGER NOT NULL
+  );
+
   CREATE TABLE IF NOT EXISTS role_rewards (
     guild_id TEXT NOT NULL,
     level INTEGER NOT NULL,
@@ -109,7 +114,7 @@ export const dbStatements: Record<string, Statement> = {
 
   endSession: db.prepare(`
     UPDATE voice_sessions
-    SET left_at = ?, duration_seconds = ? - joined_at
+    SET left_at = MAX(?, joined_at), duration_seconds = MAX(?, joined_at) - joined_at
     WHERE user_id = ? AND guild_id = ? AND left_at IS NULL
   `),
 
@@ -197,10 +202,20 @@ export const dbStatements: Record<string, Statement> = {
     SELECT * FROM voice_sessions WHERE left_at IS NULL AND guild_id = ?
   `),
 
+  // MAX(?, joined_at): o horário de fechamento vem do heartbeat, que pode ser
+  // anterior ao início da sessão se o bot subiu, alguém entrou e ele caiu antes
+  // do primeiro batimento. Sem o MAX isso vira duração negativa.
   closeAllSessions: db.prepare(`
     UPDATE voice_sessions
-    SET left_at = ?, duration_seconds = ? - joined_at
+    SET left_at = MAX(?, joined_at), duration_seconds = MAX(?, joined_at) - joined_at
     WHERE left_at IS NULL
+  `),
+
+  getMeta: db.prepare(`SELECT value FROM bot_meta WHERE key = ?`),
+
+  setMeta: db.prepare(`
+    INSERT INTO bot_meta (key, value) VALUES (?, ?)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value
   `),
 
   getGuildSettings: db.prepare(`SELECT * FROM guild_settings WHERE guild_id = ?`),

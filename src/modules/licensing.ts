@@ -177,7 +177,9 @@ const cache = new Map<string, License>();
 function toLicense(row: Row): License {
   return {
     guildId: row.guild_id,
-    plan: (row.plan as Plan) in PLANS ? (row.plan as Plan) : 'basic',
+    // Plano desconhecido cai no gratuito, não no Básico: um valor errado no banco
+    // não pode liberar recurso pago.
+    plan: (row.plan as Plan) in PLANS ? (row.plan as Plan) : 'free',
     status: row.status as LicenseStatus,
     founder: row.founder === 1,
     startedAt: row.started_at,

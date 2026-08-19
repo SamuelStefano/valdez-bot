@@ -155,3 +155,7 @@ export function setupLiveCounter(client: Client): void {
 export function stopLiveCounter(client: Client, guildId: string): void {
   void close(client, guildId);
 }
+
+export function dropGuildCounter(guildId: string): void {
+  counters.delete(guildId);
+}

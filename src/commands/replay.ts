@@ -75,7 +75,14 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       return;
     }
 
-    const seconds = Math.round((Date.now() - startedAt) / 1000) + config.startLookbackSeconds;
+    // O buffer da gravação é podado em maxRecordingSeconds, então o relógio de
+    // parede passa disso mas o áudio não — sem o teto o clip é anunciado com uma
+    // duração que ele não tem.
+    const elapsed = Math.min(
+      Math.round((Date.now() - startedAt) / 1000),
+      config.maxRecordingSeconds
+    );
+    const seconds = elapsed + config.startLookbackSeconds;
 
     track(guildId, 'replay', { userId: interaction.user.id, seconds, detail: 'mp3' });
     await publishClip(interaction, { packets, seconds, kind: 'replay' });

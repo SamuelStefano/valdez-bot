@@ -28,6 +28,26 @@ const voices = new Map<string, GuildVoice>();
 let watchdogInterval: NodeJS.Timeout | null = null;
 let listenersBound = false;
 
+// O musicPlayer importa este módulo, então a chamada de volta tem que ser
+// injetada — importar de lá fecharia o ciclo.
+let musicStopper: ((guildId: string) => void) | null = null;
+
+export function setMusicStopper(fn: (guildId: string) => void): void {
+  musicStopper = fn;
+}
+
+// Sem isso a flag fica presa em true depois de uma saída com música tocando, e
+// o watchdog nunca mais checa se o áudio daquele servidor morreu.
+function stopMusic(guildId: string): void {
+  const v = voices.get(guildId);
+  if (v) v.musicActive = false;
+  try {
+    musicStopper?.(guildId);
+  } catch (err: any) {
+    logger.error(`[VOICE] ${guildId}: falha ao parar música: ${err?.message}`);
+  }
+}
+
 const WATCHDOG_TICK_MS = 60_000;
 // Force a rejoin if we are connected with people present but no audio has
 // arrived for this long — the receiver died silently (no Disconnected event).
@@ -80,6 +100,7 @@ export async function setPresence(client: Client, guildId: string, enabled: bool
 
 export async function leaveChannel(client: Client, guildId: string): Promise<void> {
   const v = state(guildId);
+  stopMusic(guildId);
   if (v.reconnectTimeout) {
     clearTimeout(v.reconnectTimeout);
     v.reconnectTimeout = null;
@@ -338,6 +359,7 @@ function scheduleReconnect(client: Client, guildId: string, delay = 30_000) {
 
 export function dropGuildVoice(guildId: string): void {
   const v = voices.get(guildId);
+  stopMusic(guildId);
   if (v?.reconnectTimeout) clearTimeout(v.reconnectTimeout);
   if (v?.connection) {
     v.connection.removeAllListeners();
