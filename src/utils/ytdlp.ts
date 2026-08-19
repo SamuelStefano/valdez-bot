@@ -90,6 +90,46 @@ export async function ytInfo(url: string): Promise<YtInfo | null> {
   return items[0] ? toInfo(items[0]) : null;
 }
 
+// O SoundCloud não exige login e responde normal do IP do datacenter, então é
+// pra onde a busca cai quando o YouTube recusa o bot.
+export async function scSearch(query: string, limit = 3): Promise<YtInfo[]> {
+  const items = await runJson([
+    `scsearch${limit}:${query}`,
+    '--dump-json',
+    '--flat-playlist',
+    '--no-warnings',
+  ]);
+  return items.map(toInfo);
+}
+
+// Faixa de gravadora no SoundCloud vem com DRM e só quebra na hora de baixar.
+// A extração completa acusa antes, o que deixa escolher outro resultado sem
+// derrubar a música na cara de quem pediu.
+export async function scResolve(url: string): Promise<YtInfo | null> {
+  try {
+    const items = await runJson([url, '--dump-json', '--no-warnings', '--no-playlist']);
+    return items[0] ? toInfo(items[0]) : null;
+  } catch {
+    return null;
+  }
+}
+
+// O oEmbed responde sem autenticação mesmo quando a extração do vídeo está
+// bloqueada — é o que permite achar no SoundCloud o link que o usuário colou.
+export async function youtubeTitle(url: string): Promise<string | null> {
+  try {
+    const res = await fetch(
+      `https://www.youtube.com/oembed?url=${encodeURIComponent(url)}&format=json`,
+      { signal: AbortSignal.timeout(8000) },
+    );
+    if (!res.ok) return null;
+    const data = (await res.json()) as { title?: string };
+    return data.title || null;
+  } catch {
+    return null;
+  }
+}
+
 export async function ytPlaylist(url: string): Promise<{ title: string; videos: YtInfo[] }> {
   const items = await runJson([
     url,

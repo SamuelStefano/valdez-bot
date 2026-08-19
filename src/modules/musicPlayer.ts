@@ -9,7 +9,7 @@ import {
 import { logger } from '../utils/logger';
 import { getConnection, unmute, mute, setMusicActive } from './voiceManager';
 import { fetchSpotifyAlbum, fetchSpotifyPlaylist, fetchSpotifyTrack, SpotifyTrack } from '../utils/spotifyApi';
-import { ytInfo, ytPlaylist, ytSearch, ytStream } from '../utils/ytdlp';
+import { scResolve, scSearch, youtubeTitle, ytInfo, ytPlaylist, ytSearch, ytStream } from '../utils/ytdlp';
 
 export interface Track {
   title: string;
@@ -21,7 +21,7 @@ export interface Track {
 
 export interface AddResult {
   tracks: Track[];
-  source: 'youtube' | 'spotify' | 'search';
+  source: 'youtube' | 'spotify' | 'search' | 'soundcloud';
   playlistName?: string;
 }
 
@@ -146,8 +146,8 @@ async function buildTrackFromSpotifySearch(
   thumbnail?: string,
 ): Promise<Track | null> {
   const q = `${name} ${artist}`.trim();
-  const results = await ytSearch(q, 1);
-  if (!results[0]) return null;
+  const results = await ytSearch(q, 1).catch(() => []);
+  if (!results[0]) return buildTrackFromSoundCloud(q, requestedBy);
   return {
     title: name || results[0].title,
     url: results[0].url,
@@ -155,6 +155,24 @@ async function buildTrackFromSpotifySearch(
     requestedBy,
     thumbnail: thumbnail || results[0].thumbnail,
   };
+}
+
+// Percorre os primeiros resultados porque o primeiro pode ser uma faixa com DRM,
+// que só falharia na hora de tocar.
+async function buildTrackFromSoundCloud(query: string, requestedBy: string): Promise<Track | null> {
+  const candidates = await scSearch(query, 3).catch(() => []);
+  for (const candidate of candidates) {
+    const info = await scResolve(candidate.url);
+    if (!info) continue;
+    return {
+      title: info.title,
+      url: info.url,
+      duration: formatSeconds(info.durationSec),
+      requestedBy,
+      thumbnail: info.thumbnail,
+    };
+  }
+  return null;
 }
 
 export async function addTracks(
@@ -168,11 +186,21 @@ export async function addTracks(
     const urlType = detectUrlType(query);
 
     if (urlType === 'yt_video') {
-      const track = await buildTrackFromYouTubeUrl(query, requestedBy);
-      if (!track) return null;
-      queue.tracks.push(track);
+      const track = await buildTrackFromYouTubeUrl(query, requestedBy).catch(() => null);
+      if (track) {
+        queue.tracks.push(track);
+        if (!queue.current) playNext(guildId);
+        return { tracks: [track], source: 'youtube' };
+      }
+
+      // O título continua acessível pelo oEmbed mesmo com o vídeo bloqueado, e
+      // é ele que permite procurar a mesma música no SoundCloud.
+      const title = await youtubeTitle(query);
+      const fallback = title ? await buildTrackFromSoundCloud(title, requestedBy) : null;
+      if (!fallback) return null;
+      queue.tracks.push(fallback);
       if (!queue.current) playNext(guildId);
-      return { tracks: [track], source: 'youtube' };
+      return { tracks: [fallback], source: 'soundcloud' };
     }
 
     if (urlType === 'yt_playlist') {
@@ -243,18 +271,25 @@ export async function addTracks(
     }
 
     // Texto livre → busca YouTube
-    const results = await ytSearch(query, 1);
-    if (!results[0]) return null;
-    const track: Track = {
-      title: results[0].title,
-      url: results[0].url,
-      duration: formatSeconds(results[0].durationSec),
-      requestedBy,
-      thumbnail: results[0].thumbnail,
-    };
-    queue.tracks.push(track);
+    const results = await ytSearch(query, 1).catch(() => []);
+    if (results[0]) {
+      const track: Track = {
+        title: results[0].title,
+        url: results[0].url,
+        duration: formatSeconds(results[0].durationSec),
+        requestedBy,
+        thumbnail: results[0].thumbnail,
+      };
+      queue.tracks.push(track);
+      if (!queue.current) playNext(guildId);
+      return { tracks: [track], source: 'search' };
+    }
+
+    const fallback = await buildTrackFromSoundCloud(query, requestedBy);
+    if (!fallback) return null;
+    queue.tracks.push(fallback);
     if (!queue.current) playNext(guildId);
-    return { tracks: [track], source: 'search' };
+    return { tracks: [fallback], source: 'soundcloud' };
   } catch (err) {
     logger.error(`Error adding track "${query}": ${(err as Error).message}`);
     return null;

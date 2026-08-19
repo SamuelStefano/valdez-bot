@@ -83,15 +83,22 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
   // Single track
   const track = result.tracks[0];
+  const viaSoundCloud = result.source === 'soundcloud';
   const embed = new EmbedBuilder()
-    .setColor(0x00ff00)
-    .setTitle('🎵 Adicionado à fila')
+    .setColor(viaSoundCloud ? 0xff5500 : 0x00ff00)
+    .setTitle(viaSoundCloud ? '🎵 Adicionado à fila (via SoundCloud)' : '🎵 Adicionado à fila')
     .setDescription(`**[${track.title}](${track.url})**`)
     .addFields(
       { name: 'Duração', value: track.duration, inline: true },
       { name: 'Pedido por', value: track.requestedBy, inline: true }
     )
     .setTimestamp();
+
+  if (viaSoundCloud) {
+    embed.setFooter({
+      text: 'O YouTube recusou essa faixa, então busquei no SoundCloud — a versão pode ser diferente.',
+    });
+  }
 
   if (track.thumbnail) embed.setThumbnail(track.thumbnail);
 
