@@ -1,13 +1,11 @@
 import { appendFileSync } from 'fs';
 import { dirname, join } from 'path';
-import { Client, EmbedBuilder, TextChannel } from 'discord.js';
-import { config } from '../config';
 import { logger } from '../utils/logger';
 
 // O YouTube bloqueia o IP do datacenter e só libera com cookies de uma conta
-// logada. Esses cookies caem sozinhos (expiram ou a conta é sinalizada), e a
-// falha chega ao usuário como "não encontrei nada" — sem isso aqui, ninguém
-// descobre que o motivo é a conta até alguém reclamar.
+// logada. Manter esses cookies é trabalho manual que não vale a pena, então o
+// bloqueio fica registrado no log e o usuário recebe a explicação no /play —
+// avisar no canal só enchia o chat com um pedido que ninguém ia atender.
 const BLOCK_PATTERNS = [
   /sign in to confirm/i,
   /cookies are no longer valid/i,
@@ -24,7 +22,6 @@ const LOG_PATH = join(dirname(process.env.YT_COOKIES_PATH || '/app/data/x'), 'yt
 
 let blocked = false;
 let lastAlertAt = 0;
-let client: Client | null = null;
 
 export function isBlockError(message: string): boolean {
   return BLOCK_PATTERNS.some((p) => p.test(message));
@@ -42,31 +39,6 @@ function writeLog(line: string): void {
   }
 }
 
-async function alertOwner(detail: string): Promise<void> {
-  const channelId = config.seedClipsChannelId;
-  if (!client || !channelId) return;
-
-  const channel = client.channels.cache.get(channelId) as TextChannel | undefined;
-  if (!channel?.isTextBased()) return;
-
-  const embed = new EmbedBuilder()
-    .setColor(0xed4245)
-    .setTitle('🍪 Cookies do YouTube caíram')
-    .setDescription(
-      'A música parou de funcionar: o YouTube está recusando o bot sem uma conta logada.\n' +
-        'Gere um `cookies.txt` novo de uma conta descartável e substitua ' +
-        `\`${process.env.YT_COOKIES_PATH || 'data/youtube-cookies.txt'}\`, depois reinicie o container.`
-    )
-    .addFields({ name: 'Erro do yt-dlp', value: `\`\`\`${detail.slice(0, 400)}\`\`\`` })
-    .setTimestamp();
-
-  try {
-    await channel.send({ embeds: [embed] });
-  } catch (err: any) {
-    logger.warn(`[YT] falha ao avisar no canal: ${err?.message}`);
-  }
-}
-
 export function reportBlocked(detail: string): void {
   const now = Date.now();
   const isNew = !blocked;
@@ -75,9 +47,8 @@ export function reportBlocked(detail: string): void {
   blocked = true;
   lastAlertAt = now;
 
-  logger.error(`[YT] BLOQUEADO — cookies do YouTube inválidos ou expirados: ${detail.slice(0, 200)}`);
+  logger.warn(`[YT] bloqueado pelo YouTube (esperado, sem cookies): ${detail.slice(0, 120)}`);
   writeLog(`BLOQUEADO ${isNew ? '(novo)' : '(persiste)'} — ${detail.slice(0, 300)}`);
-  void alertOwner(detail);
 }
 
 export function reportWorking(): void {
@@ -88,9 +59,7 @@ export function reportWorking(): void {
   writeLog('OK — voltou a funcionar');
 }
 
-export function startYtHealthWatchdog(discordClient: Client): void {
-  client = discordClient;
-
+export function startYtHealthWatchdog(): void {
   const check = async () => {
     try {
       // O import fica dentro do try: uma falha ao carregar o módulo derrubava o

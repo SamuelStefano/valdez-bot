@@ -141,7 +141,7 @@ client.once('ready', async () => {
   startVoiceWatchdog(client);
   startSupabaseSync(client);
   startWeeklyRecap(client);
-  startYtHealthWatchdog(client);
+  startYtHealthWatchdog();
   sweepOrphanRecordings();
   setInterval(sweepOrphanRecordings, 3600_000).unref();
 });
