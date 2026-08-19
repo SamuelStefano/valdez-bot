@@ -29,6 +29,7 @@ import { logSpotifyStatus } from './utils/spotifyApi';
 import { startHealthServer, startHeartbeat } from './utils/health';
 import { startSupabaseSync } from './modules/supabaseSync';
 import { startWeeklyRecap } from './modules/weeklyRecap';
+import { startYtHealthWatchdog } from './modules/ytHealth';
 
 import * as ping from './commands/ping';
 import * as horas from './commands/horas';
@@ -133,6 +134,7 @@ client.once('ready', async () => {
   startVoiceWatchdog(client);
   startSupabaseSync(client);
   startWeeklyRecap(client);
+  startYtHealthWatchdog(client);
 });
 
 client.on('guildCreate', async (guild) => {

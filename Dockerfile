@@ -16,6 +16,16 @@ RUN apt-get update && apt-get install -y \
   && yt-dlp --version \
   && rm -rf /var/lib/apt/lists/*
 
+# O yt-dlp resolve o desafio de assinatura do YouTube executando JavaScript e só
+# habilita o Deno por padrão. Sem ele a extração cai em "No supported JavaScript
+# runtime" e o áudio não sai nem com os cookies válidos.
+RUN curl -fsSL -o /tmp/deno.zip \
+      https://github.com/denoland/deno/releases/latest/download/deno-x86_64-unknown-linux-gnu.zip \
+  && python3 -c "import zipfile; zipfile.ZipFile('/tmp/deno.zip').extractall('/usr/local/bin')" \
+  && chmod +x /usr/local/bin/deno \
+  && rm /tmp/deno.zip \
+  && deno --version
+
 WORKDIR /app
 
 COPY package*.json ./

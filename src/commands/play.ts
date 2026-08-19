@@ -3,6 +3,7 @@ import { addTracks, isCollection } from '../modules/musicPlayer';
 import { setMusicChannel } from '../modules/musicModal';
 import { isConfigured } from '../modules/guildSettings';
 import { limits, upsell } from '../modules/licensing';
+import { youtubeBlocked } from '../modules/ytHealth';
 
 export const data = new SlashCommandBuilder()
   .setName('play')
@@ -52,7 +53,11 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   const result = await addTracks(guildId, query, interaction.user.displayName);
 
   if (!result || result.tracks.length === 0) {
-    await interaction.editReply('❌ Não encontrei nada — verifique a URL ou tente outro termo.');
+    await interaction.editReply(
+      youtubeBlocked()
+        ? '❌ O YouTube está bloqueando o bot no momento. Já avisei o administrador — tente de novo mais tarde.'
+        : '❌ Não encontrei nada — verifique a URL ou tente outro termo.'
+    );
     return;
   }
 

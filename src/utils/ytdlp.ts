@@ -1,6 +1,7 @@
 import { spawn } from 'child_process';
 import { Readable } from 'stream';
 import { logger } from './logger';
+import { isBlockError, reportBlocked, reportWorking } from '../modules/ytHealth';
 
 const YTDLP = process.env.YTDLP_PATH || 'yt-dlp';
 const COOKIES_PATH = process.env.YT_COOKIES_PATH || '';
@@ -29,8 +30,10 @@ function runJson(args: string[]): Promise<any[]> {
     proc.on('error', reject);
     proc.on('close', (code) => {
       if (code !== 0) {
+        if (isBlockError(stderr)) reportBlocked(stderr.trim());
         return reject(new Error(`yt-dlp exited ${code}: ${stderr.trim().slice(0, 300)}`));
       }
+      reportWorking();
       const out = stdout
         .split('\n')
         .map((l) => l.trim())
@@ -131,7 +134,9 @@ export function ytStream(url: string): Readable {
 
   proc.stderr.on('data', (d) => {
     const msg = d.toString().trim();
-    if (msg) logger.warn(`yt-dlp stderr: ${msg.slice(0, 200)}`);
+    if (!msg) return;
+    if (isBlockError(msg)) reportBlocked(msg);
+    logger.warn(`yt-dlp stderr: ${msg.slice(0, 200)}`);
   });
   proc.on('error', (err) => {
     logger.error(`yt-dlp spawn error: ${err.message}`);

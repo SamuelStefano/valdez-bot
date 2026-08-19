@@ -75,6 +75,19 @@ Veja [DEPLOY_HETZNER.md](./DEPLOY_HETZNER.md) — Docker Compose com volume pers
 3. Adicione as variáveis de ambiente (mesmas do .env)
 4. Deploy automático!
 
+## Cookies do YouTube
+
+O YouTube recusa requisições do IP do datacenter com "Sign in to confirm you're not a bot". A única saída é rodar o yt-dlp com cookies de uma conta logada — use uma conta **descartável**, porque ela pode ser sinalizada.
+
+Como trocar quando cair:
+
+1. Faça login no YouTube com a conta descartável, em uma janela anônima.
+2. Exporte os cookies em formato Netscape (extensão "Get cookies.txt LOCALLY").
+3. Feche a janela anônima **sem deslogar** — deslogar invalida os cookies exportados.
+4. Substitua `data/youtube-cookies.txt` e reinicie: `docker compose restart valdez`.
+
+O bot monitora isso sozinho: quando o bloqueio volta, ele avisa no canal do `LOG_CHANNEL_ID` e registra em `data/yt-health.log`.
+
 ## Stack
 
 - TypeScript + Node.js 20
