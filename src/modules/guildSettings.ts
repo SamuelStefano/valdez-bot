@@ -7,6 +7,7 @@ export interface GuildSettings {
   clipsChannelId: string | null;
   autoJoin: boolean;
   liveCounter: boolean;
+  announce: boolean;
 }
 
 interface Row {
@@ -15,6 +16,7 @@ interface Row {
   clips_channel_id: string | null;
   auto_join: number;
   live_counter: number;
+  announce: number;
 }
 
 // Cache em memória: cada pacote de voz consulta o opt-out e cada tick do
@@ -30,6 +32,7 @@ function toSettings(row: Row): GuildSettings {
     clipsChannelId: row.clips_channel_id,
     autoJoin: row.auto_join === 1,
     liveCounter: row.live_counter === 1,
+    announce: row.announce === 1,
   };
 }
 
@@ -53,6 +56,7 @@ function seedFromEnv(): void {
     clipsChannelId: seedClipsChannelId,
     autoJoin: true,
     liveCounter: false,
+    announce: false,
   });
 }
 
@@ -63,7 +67,7 @@ export function getSettings(guildId: string): GuildSettings {
   const row = dbStatements.getGuildSettings.get(guildId) as Row | undefined;
   const settings = row
     ? toSettings(row)
-    : { guildId, voiceChannelId: null, clipsChannelId: null, autoJoin: true, liveCounter: false };
+    : { guildId, voiceChannelId: null, clipsChannelId: null, autoJoin: true, liveCounter: false, announce: false };
   cache.set(guildId, settings);
   return settings;
 }
@@ -76,6 +80,7 @@ export function saveSettings(patch: Partial<GuildSettings> & { guildId: string }
     clips_channel_id: next.clipsChannelId,
     auto_join: next.autoJoin ? 1 : 0,
     live_counter: next.liveCounter ? 1 : 0,
+    announce: next.announce ? 1 : 0,
     joined_at: Math.floor(Date.now() / 1000),
   });
   cache.set(next.guildId, next);

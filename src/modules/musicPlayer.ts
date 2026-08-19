@@ -1,6 +1,7 @@
 import {
   AudioPlayer,
   AudioPlayerStatus,
+  AudioResource,
   createAudioPlayer,
   createAudioResource,
   NoSubscriberBehavior,
@@ -32,6 +33,9 @@ interface GuildQueue {
   player: AudioPlayer;
   loop: boolean;
   volume: number;
+  resource: AudioResource | null;
+  recovering: boolean;
+  manualStop: boolean;
 }
 
 const queues = new Map<string, GuildQueue>();
@@ -43,7 +47,9 @@ export type PlayerUpdateEvent =
   | 'paused'
   | 'resumed'
   | 'queueChanged'
-  | 'stopped';
+  | 'stopped'
+  | 'trackRecovered'
+  | 'trackFailed';
 
 let onUpdate: ((guildId: string, event: PlayerUpdateEvent) => void) | null = null;
 
@@ -92,6 +98,24 @@ function getOrCreateQueue(guildId: string): GuildQueue {
       const queue = queues.get(guildId);
       if (!queue) return;
 
+      // Skip e stop também caem aqui com duração zero, e sem distinguir os dois
+      // o pulo do usuário seria lido como faixa bloqueada.
+      const manual = queue.manualStop;
+      queue.manualStop = false;
+
+      // A busca e a playlist do YouTube usam --flat-playlist, que responde sem
+      // tocar no player do vídeo: a faixa entra na fila mesmo bloqueada e só
+      // morre aqui, sem um byte de áudio. Antes isso virava silêncio — o bot
+      // percorria a fila inteira sem dizer nada.
+
+      const played = queue.resource?.playbackDuration ?? 0;
+      if (!manual && queue.current && !queue.recovering && played < DEAD_STREAM_MS && isYouTubeUrl(queue.current.url)) {
+        queue.recovering = true;
+        void recoverViaSoundCloud(guildId, queue.current);
+        return;
+      }
+      queue.recovering = false;
+
       if (queue.current) {
         if (queue.loop) {
           queue.tracks.unshift(queue.current);
@@ -122,6 +146,9 @@ function getOrCreateQueue(guildId: string): GuildQueue {
       player,
       loop: false,
       volume: 100,
+      resource: null,
+      recovering: false,
+      manualStop: false,
     });
   }
   return queues.get(guildId)!;
@@ -155,6 +182,35 @@ async function buildTrackFromSpotifySearch(
     requestedBy,
     thumbnail: thumbnail || results[0].thumbnail,
   };
+}
+
+// Menos que isso não é música tocada, é o yt-dlp morrendo antes do primeiro byte.
+const DEAD_STREAM_MS = 1500;
+
+function isYouTubeUrl(url: string): boolean {
+  return /^https?:\/\/(?:www\.)?(?:youtube\.com|youtu\.be)\//i.test(url);
+}
+
+async function recoverViaSoundCloud(guildId: string, dead: Track): Promise<void> {
+  const queue = queues.get(guildId);
+  if (!queue) return;
+
+  const alt = await buildTrackFromSoundCloud(dead.title, dead.requestedBy).catch(() => null);
+  queue.current = null;
+
+  if (!alt) {
+    logger.warn(`Sem alternativa no SoundCloud para "${dead.title}"`);
+    queue.recovering = false;
+    emit(guildId, 'trackFailed');
+    playNext(guildId);
+    return;
+  }
+
+  logger.info(`"${dead.title}" recuperada no SoundCloud: ${alt.url}`);
+  queue.tracks.unshift(alt);
+  queue.recovering = false;
+  emit(guildId, 'trackRecovered');
+  playNext(guildId);
 }
 
 // Percorre os primeiros resultados porque o primeiro pode ser uma faixa com DRM,
@@ -301,6 +357,7 @@ async function playNext(guildId: string) {
 
   if (queue.tracks.length === 0) {
     queue.current = null;
+    queue.resource = null;
     setMusicActive(guildId, false);
     mute(guildId);
     emit(guildId, 'stopped');
@@ -313,6 +370,7 @@ async function playNext(guildId: string) {
   try {
     const stream = ytStream(track.url);
     const resource = createAudioResource(stream, { inputType: StreamType.Arbitrary });
+    queue.resource = resource;
 
     unmute(guildId);
 
@@ -336,6 +394,7 @@ export function skip(guildId: string): Track | null {
   const queue = queues.get(guildId);
   if (!queue || !queue.current) return null;
   const skipped = queue.current;
+  queue.manualStop = true;
   queue.player.stop();
   return skipped;
 }
@@ -348,6 +407,7 @@ export function previous(guildId: string): Track | null {
   if (queue.current) queue.tracks.unshift(queue.current);
   queue.tracks.unshift(prev);
   queue.current = null;
+  queue.manualStop = true;
   queue.player.stop();
   return prev;
 }
@@ -359,6 +419,7 @@ export function stop(guildId: string) {
   queue.history = [];
   queue.current = null;
   queue.loop = false;
+  queue.manualStop = true;
   queue.player.stop();
   setMusicActive(guildId, false);
   mute(guildId);
@@ -372,6 +433,7 @@ setMusicStopper(stop);
 export function dropGuildMusic(guildId: string): void {
   const queue = queues.get(guildId);
   if (!queue) return;
+  queue.manualStop = true;
   queue.player.stop();
   queue.player.removeAllListeners();
   queues.delete(guildId);

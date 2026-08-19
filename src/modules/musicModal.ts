@@ -42,7 +42,22 @@ let client: Client | null = null;
 
 export function initMusicModal(c: Client) {
   client = c;
-  setOnPlayerUpdate((guildId) => scheduleUpdate(guildId));
+  setOnPlayerUpdate((guildId, event) => {
+    if (event === 'trackRecovered' || event === 'trackFailed') void notice(guildId, event);
+    scheduleUpdate(guildId);
+  });
+}
+
+// Trocar de fonte no meio da fila é uma surpresa silenciosa: o card só mostra
+// outro título e ninguém entende por quê.
+async function notice(guildId: string, event: 'trackRecovered' | 'trackFailed'): Promise<void> {
+  const channel = await getModalChannel(guildId);
+  if (!channel) return;
+  const content =
+    event === 'trackRecovered'
+      ? '🔁 O YouTube recusou essa faixa — peguei a mesma música no SoundCloud.'
+      : '⏭️ O YouTube recusou essa faixa e não achei ela no SoundCloud. Pulando.';
+  await channel.send({ content }).catch(() => {});
 }
 
 // Chamado pelo /play pra dizer onde o modal deve aparecer.

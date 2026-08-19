@@ -56,6 +56,14 @@ export const data = new SlashCommandBuilder()
         opt.setName('ligado').setDescription('Deixar o contador na call').setRequired(true)
       )
   )
+  .addSubcommand((sub) =>
+    sub
+      .setName('avisos')
+      .setDescription('Avisa no canal de texto quando alguém entra ou sai da call')
+      .addBooleanOption((opt) =>
+        opt.setName('ligado').setDescription('Postar os avisos').setRequired(true)
+      )
+  )
   .addSubcommandGroup((group) =>
     group
       .setName('cargos')
@@ -250,6 +258,23 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     return;
   }
 
+  if (sub === 'avisos') {
+    if (!limits(guildId).stats) {
+      await interaction.reply({ content: upsell('Avisos de entrada e saída'), ephemeral: true });
+      return;
+    }
+    const ligado = interaction.options.getBoolean('ligado', true);
+    saveSettings({ guildId, announce: ligado });
+
+    await interaction.reply({
+      content: ligado
+        ? '✅ Avisos ligados. Vou postar quem abriu a call, quem entrou e quanto tempo cada um ficou.'
+        : '⚪ Avisos desligados.',
+      ephemeral: true,
+    });
+    return;
+  }
+
   const settings = getSettings(guildId);
   const plan = limits(guildId);
   const license = getLicense(guildId);
@@ -270,6 +295,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       },
       { name: 'Presença automática', value: settings.autoJoin ? '🟢 ativa' : '⚪ desativada', inline: true },
       { name: 'Contador na call', value: settings.liveCounter ? '🟢 ligado' : '⚪ desligado', inline: true },
+      { name: 'Avisos de call', value: settings.announce ? '🟢 ligados' : '⚪ desligados', inline: true },
       { name: 'Na call agora', value: isConnected(guildId) ? 'sim' : 'não', inline: true },
       { name: 'Buffer', value: `últimos ${formatLabel(plan.bufferSeconds)}`, inline: true },
       { name: 'Opt-outs', value: `${optOutCount(guildId)} membro(s)`, inline: true },
