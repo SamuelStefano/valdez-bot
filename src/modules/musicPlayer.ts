@@ -213,10 +213,21 @@ async function recoverViaSoundCloud(guildId: string, dead: Track): Promise<void>
   playNext(guildId);
 }
 
-// Percorre os primeiros resultados porque o primeiro pode ser uma faixa com DRM,
-// que só falharia na hora de tocar.
+// Faixa de gravadora no SoundCloud vem cortada em 30s exatos (o preview do Go+),
+// e nas músicas conhecidas os primeiros resultados são todos assim. Como a busca
+// já devolve a duração, o corte sai antes de resolver cada candidato — e os
+// previews ficam no fim da fila em vez de descartados, porque 30s ainda é melhor
+// que silêncio quando não existe nenhuma versão cheia.
+const SC_PREVIEW_SECONDS = 30;
+
+// Percorre os primeiros resultados porque o candidato pode ter DRM, que só
+// falharia na hora de tocar.
 async function buildTrackFromSoundCloud(query: string, requestedBy: string): Promise<Track | null> {
-  const candidates = await scSearch(query, 3).catch(() => []);
+  const found = await scSearch(query, 8).catch(() => []);
+  const candidates = [
+    ...found.filter((c) => c.durationSec > SC_PREVIEW_SECONDS),
+    ...found.filter((c) => c.durationSec <= SC_PREVIEW_SECONDS),
+  ];
   for (const candidate of candidates) {
     const info = await scResolve(candidate.url);
     if (!info) continue;
