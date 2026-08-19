@@ -14,7 +14,8 @@ export type EventKind =
   | 'export_error'
   | 'role_reward'
   | 'recap'
-  | 'weekly_recap';
+  | 'weekly_recap'
+  | 'highlight';
 
 interface EventDetail {
   userId?: string;

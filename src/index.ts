@@ -14,6 +14,7 @@ import { setupVoiceTracker, closeStaleSessions, markAlive } from './modules/voic
 import { setupLiveCounter, dropGuildCounter } from './modules/liveCounter';
 import { dropGuildMusic } from './modules/musicPlayer';
 import { setupCallAnnounce, dropGuildAnnounce } from './modules/callAnnounce';
+import { setupHighlightDetector, dropGuildHighlights } from './modules/highlightDetector';
 import { loadAllSettings, forgetGuild } from './modules/guildSettings';
 import {
   loadLicenses,
@@ -130,6 +131,7 @@ client.once('ready', async () => {
   setupVoiceTracker(client);
   setupLiveCounter(client);
   setupCallAnnounce(client);
+  setupHighlightDetector(client);
   setupAutoPresence(client);
   initMusicModal(client);
   startHeartbeat(client);
@@ -158,6 +160,7 @@ client.on('guildDelete', (guild) => {
   dropGuildMusic(guild.id);
   dropGuildCounter(guild.id);
   dropGuildAnnounce(guild.id);
+  dropGuildHighlights(guild.id);
   forgetGuild(guild.id);
   dropLicenseCache(guild.id);
   clearExpiredNotice(guild.id);

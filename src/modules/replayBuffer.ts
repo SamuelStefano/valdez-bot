@@ -37,6 +37,14 @@ interface GuildBuffer {
 
 const guilds = new Map<string, GuildBuffer>();
 
+// O detector de momentos precisa do mesmo evento de fala, mas importar de lá
+// fecharia o ciclo — ele já lê o buffer daqui.
+let speakingObserver: ((guildId: string, userId: string) => void) | null = null;
+
+export function setSpeakingObserver(fn: (guildId: string, userId: string) => void): void {
+  speakingObserver = fn;
+}
+
 function state(guildId: string): GuildBuffer {
   let g = guilds.get(guildId);
   if (!g) {
@@ -105,6 +113,12 @@ export function startBuffering(guildId: string, connection: VoiceConnection) {
     // Quem deu opt-out nunca entra no buffer: o áudio dele não é guardado nem
     // por um instante, em vez de ser filtrado só na hora de exportar.
     if (hasOptedOut(guildId, userId)) return;
+
+    try {
+      speakingObserver?.(guildId, userId);
+    } catch (err: any) {
+      logger.warn(`[BUFFER] ${guildId}: observer falhou: ${err?.message}`);
+    }
 
     logger.info(`[BUFFER] ${guildId}: user ${userId} started speaking`);
 

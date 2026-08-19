@@ -64,6 +64,14 @@ export const data = new SlashCommandBuilder()
         opt.setName('ligado').setDescription('Postar os avisos').setRequired(true)
       )
   )
+  .addSubcommand((sub) =>
+    sub
+      .setName('momentos')
+      .setDescription('Posta sozinho um clip quando a call reage junto (risada, grito)')
+      .addBooleanOption((opt) =>
+        opt.setName('ligado').setDescription('Detectar momentos automaticamente').setRequired(true)
+      )
+  )
   .addSubcommandGroup((group) =>
     group
       .setName('cargos')
@@ -275,6 +283,30 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     return;
   }
 
+  if (sub === 'momentos') {
+    if (!limits(guildId).clipsChannel) {
+      await interaction.reply({ content: upsell('Momentos automáticos da call'), ephemeral: true });
+      return;
+    }
+    const ligado = interaction.options.getBoolean('ligado', true);
+    if (ligado && !getSettings(guildId).clipsChannelId) {
+      await interaction.reply({
+        content: '⚠️ Configure antes onde posto os clips: `/config clips`.',
+        ephemeral: true,
+      });
+      return;
+    }
+    saveSettings({ guildId, highlights: ligado });
+
+    await interaction.reply({
+      content: ligado
+        ? '✅ Momentos ligados. Quando a call inteira reagir junto, eu corto os últimos 25s e posto — no máximo 3 por call.'
+        : '⚪ Momentos desligados. Use `/clip` quando quiser cortar na mão.',
+      ephemeral: true,
+    });
+    return;
+  }
+
   const settings = getSettings(guildId);
   const plan = limits(guildId);
   const license = getLicense(guildId);
@@ -296,6 +328,15 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       { name: 'Presença automática', value: settings.autoJoin ? '🟢 ativa' : '⚪ desativada', inline: true },
       { name: 'Contador na call', value: settings.liveCounter ? '🟢 ligado' : '⚪ desligado', inline: true },
       { name: 'Avisos de call', value: settings.announce ? '🟢 ligados' : '⚪ desligados', inline: true },
+      {
+        name: 'Momentos automáticos',
+        value: plan.clipsChannel
+          ? settings.highlights
+            ? '🟢 ligados'
+            : '⚪ desligados'
+          : '🔒 Pro',
+        inline: true,
+      },
       { name: 'Na call agora', value: isConnected(guildId) ? 'sim' : 'não', inline: true },
       { name: 'Buffer', value: `últimos ${formatLabel(plan.bufferSeconds)}`, inline: true },
       { name: 'Opt-outs', value: `${optOutCount(guildId)} membro(s)`, inline: true },

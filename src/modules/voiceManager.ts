@@ -9,6 +9,7 @@ import {
 import { Client, ChannelType, VoiceState } from 'discord.js';
 import { logger } from '../utils/logger';
 import { startBuffering, resetBuffering, getLastActivityAt, dropGuild } from './replayBuffer';
+import { resetHighlights } from './highlightDetector';
 import { getSettings, saveSettings, isConfigured } from './guildSettings';
 import { showRecordingIndicator, clearRecordingIndicator, announceBuffering } from './consent';
 import { isActive } from './licensing';
@@ -342,6 +343,7 @@ async function beginCapture(
   const v = state(guildId);
   if (!v.announced) {
     v.announced = true;
+    resetHighlights(guildId);
     await announceBuffering(client, guildId, voiceChannelId);
   }
 }

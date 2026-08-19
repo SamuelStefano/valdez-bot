@@ -166,13 +166,15 @@ const DOCS: Doc[] = [
   },
   {
     name: '/config',
-    usage: '/config canal · clips · contador · cargos · status',
+    usage: '/config canal · clips · contador · avisos · momentos · cargos · status',
     category: 'servidor',
     summary: 'A configuração do servidor (só admin)',
     detail: [
       '**canal** — define o canal de voz que o bot acompanha. Sem isso ele não entra em lugar nenhum.',
       '**clips** — canal de texto onde os clips caem. Sem definir, o clip responde no próprio canal do comando.',
       '**contador** — liga o contador de horas ao vivo no nome da call, atualizado a cada minuto.',
+      '**avisos** — posta no canal de texto quem abriu a call, quem entrou e quanto tempo cada um ficou.',
+      '**momentos** — o Valdez corta e posta sozinho os últimos 25s quando a call inteira reage junto (risada, grito). No máximo 3 por call.',
       '**cargos add `<nível>` `<cargo>`** — entrega um cargo automaticamente quando alguém chega naquele nível de horas em call. Quem já passou do nível ganha o cargo ao sair da próxima call. É o "cargo de veterano" sem ninguém precisar distribuir na mão.',
       '**cargos remover `<nível>`** — para de entregar naquele nível. Quem já ganhou continua com o cargo.',
       '**cargos lista** — mostra o que está configurado e avisa se o cargo do Valdez está abaixo do cargo que ele deveria entregar (nesse caso o Discord bloqueia a entrega).',
