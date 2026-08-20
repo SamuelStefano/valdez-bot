@@ -24,6 +24,9 @@ export function startHealthServer(client: Client, port = Number(process.env.HEAL
       guildId,
       status: conn.state.status,
       live: LIVE_VOICE.has(conn.state.status),
+      // É o keepalive UDP que diz se a conexão está viva quando ninguém fala —
+      // sem ele no /health não dá pra separar sala calada de receiver morto.
+      udpPing: conn.ping.udp ?? null,
     }));
 
     const body = JSON.stringify({
