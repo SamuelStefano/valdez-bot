@@ -1,8 +1,10 @@
 import { setDefaultResultOrder } from 'node:dns';
 setDefaultResultOrder('ipv4first');
 
-import { Client, GatewayIntentBits, ChatInputCommandInteraction, REST, Routes } from 'discord.js';
+import { createHash } from 'node:crypto';
+import { Client, GatewayIntentBits, REST, Routes } from 'discord.js';
 import { config } from './config';
+import { dbStatements } from './utils/database';
 import { logger } from './utils/logger';
 import {
   setupAutoPresence,
@@ -36,54 +38,44 @@ import { startSupabaseSync, markGuildLeft } from './modules/supabaseSync';
 import { startWeeklyRecap } from './modules/weeklyRecap';
 import { startYtHealthWatchdog } from './modules/ytHealth';
 
-import * as ping from './commands/ping';
-import * as horas from './commands/horas';
-import * as leaderboard from './commands/leaderboard';
-import * as replay from './commands/replay';
-import * as clip from './commands/clip';
-import * as playCmd from './commands/play';
-import * as music from './commands/music';
-import * as call from './commands/call';
-import * as configCmd from './commands/config';
-import * as privacidade from './commands/privacidade';
-import * as assinatura from './commands/assinatura';
-import * as feedback from './commands/feedback';
-import * as clear from './commands/clear';
-import * as help from './commands/help';
 import { handleHelpSelect } from './commands/help';
+import { commandHandlers, commandPayload } from './commands/registry';
 
-const commands = new Map<string, { execute: (i: ChatInputCommandInteraction) => Promise<void> }>();
-commands.set('ping', ping);
-commands.set('horas', horas);
-commands.set('leaderboard', leaderboard);
-commands.set('replay', replay);
-commands.set('clip', clip);
-commands.set('play', playCmd);
-commands.set('music', music);
-commands.set('call', call);
-commands.set('config', configCmd);
-commands.set('privacidade', privacidade);
-commands.set('assinatura', assinatura);
-commands.set('feedback', feedback);
-commands.set('clear', clear);
-commands.set('help', help);
+// Todo PUT global republica os comandos e invalida o cache dos clientes, que
+// passam a responder "This command is outdated" até atualizarem sozinhos. Como
+// o bot registrava a cada boot, qualquer restart cobrava esse pedágio dos
+// usuários — então só republica quando o payload realmente muda.
+const COMMANDS_HASH_KEY = 'commands_hash';
 
-const allCommandsData = [
-  ping.data.toJSON(),
-  horas.data.toJSON(),
-  leaderboard.data.toJSON(),
-  replay.data.toJSON(),
-  clip.data.toJSON(),
-  playCmd.data.toJSON(),
-  music.data.toJSON(),
-  call.data.toJSON(),
-  configCmd.data.toJSON(),
-  privacidade.data.toJSON(),
-  assinatura.data.toJSON(),
-  feedback.data.toJSON(),
-  clear.data.toJSON(),
-  help.data.toJSON(),
-];
+function payloadHash(payload: unknown): number {
+  return parseInt(createHash('sha256').update(JSON.stringify(payload)).digest('hex').slice(0, 13), 16);
+}
+
+function readMeta(key: string): number | undefined {
+  return (dbStatements.getMeta.get(key) as { value: number } | undefined)?.value;
+}
+
+async function syncCommands(client: Client): Promise<void> {
+  const hash = payloadHash(commandPayload);
+  if (readMeta(COMMANDS_HASH_KEY) === hash) {
+    logger.info(`Slash commands inalterados (${commandPayload.length}) — nada a registrar`);
+    return;
+  }
+
+  const rest = new REST({ version: '10' }).setToken(config.token);
+  await rest.put(Routes.applicationCommands(config.clientId), { body: commandPayload });
+  dbStatements.setMeta.run(COMMANDS_HASH_KEY, hash);
+  logger.info(
+    `Slash commands registrados globalmente (${commandPayload.length} comandos, ${client.guilds.cache.size} servidores)`
+  );
+
+  // Os comandos guild-scoped da versão single-server continuam registrados e
+  // apareceriam duplicados ao lado dos globais.
+  if (config.seedGuildId) {
+    await rest.put(Routes.applicationGuildCommands(config.clientId, config.seedGuildId), { body: [] });
+    logger.info(`Comandos guild-scoped antigos limpos em ${config.seedGuildId}`);
+  }
+}
 
 const client = new Client({
   intents: [
@@ -116,16 +108,7 @@ client.once('ready', async () => {
   if (config.seedGuildId) ensureOwnerLicense(config.seedGuildId);
 
   try {
-    const rest = new REST({ version: '10' }).setToken(config.token);
-    await rest.put(Routes.applicationCommands(config.clientId), { body: allCommandsData });
-    logger.info(`Slash commands registered globally (${client.guilds.cache.size} servidores)`);
-
-    // Os comandos guild-scoped da versão single-server continuam registrados e
-    // apareceriam duplicados ao lado dos globais.
-    if (config.seedGuildId) {
-      await rest.put(Routes.applicationGuildCommands(config.clientId, config.seedGuildId), { body: [] });
-      logger.info(`Comandos guild-scoped antigos limpos em ${config.seedGuildId}`);
-    }
+    await syncCommands(client);
   } catch (err) {
     logger.error('Failed to register slash commands', err);
   }
@@ -203,7 +186,7 @@ client.on('interactionCreate', async (interaction) => {
 
   if (!interaction.isChatInputCommand()) return;
 
-  const command = commands.get(interaction.commandName);
+  const command = commandHandlers.get(interaction.commandName);
   if (!command) return;
 
   try {
