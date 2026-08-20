@@ -12,7 +12,7 @@ import {
 } from 'discord.js';
 import fs from 'fs';
 import { OpusPacket } from './replayBuffer';
-import { getSettings } from './guildSettings';
+import { getSettings, ClipFormat } from './guildSettings';
 import { storeClip, getClip, attachVideo, PendingClip } from './clipStore';
 import { limits, upsell } from './licensing';
 import { track } from './telemetry';
@@ -95,23 +95,24 @@ async function resolveParticipants(guild: Guild | null, userIds: string[]): Prom
   return out;
 }
 
-// Os dois formatos aparecem sempre; o que já está anexado fica desabilitado.
-// Assim o botão é a lista de downloads disponíveis, não um menu escondido.
-function formatRow(clipId: string, current: 'mp3' | 'video'): ActionRowBuilder<ButtonBuilder> {
-  return new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder()
-      .setCustomId(`clip:mp3:${clipId}`)
-      .setLabel('MP3')
-      .setEmoji('🎧')
-      .setStyle(ButtonStyle.Secondary)
-      .setDisabled(current === 'mp3'),
-    new ButtonBuilder()
-      .setCustomId(`clip:video:${clipId}`)
-      .setLabel('Vídeo da sala')
-      .setEmoji('🎬')
-      .setStyle(ButtonStyle.Secondary)
-      .setDisabled(current === 'video')
-  );
+// Só o formato que ainda não veio anexado vira botão: com os dois sempre na tela
+// e um deles desabilitado, o clip parecia estar esperando um clique pra sair.
+function formatRow(
+  clipId: string,
+  current: ClipFormat,
+  allowVideo: boolean
+): ActionRowBuilder<ButtonBuilder>[] {
+  if (current === 'mp3' && !allowVideo) return [];
+  const button =
+    current === 'mp3'
+      ? new ButtonBuilder()
+          .setCustomId(`clip:video:${clipId}`)
+          .setLabel('Também em vídeo da sala')
+          .setEmoji('🎬')
+      : new ButtonBuilder().setCustomId(`clip:mp3:${clipId}`).setLabel('Também em MP3').setEmoji('🎧');
+  return [
+    new ActionRowBuilder<ButtonBuilder>().addComponents(button.setStyle(ButtonStyle.Secondary)),
+  ];
 }
 
 function clipEmbed(clip: PendingClip, guild: Guild | null, sizeBytes: number): EmbedBuilder {
@@ -154,6 +155,55 @@ function realSeconds(packets: Map<string, OpusPacket[]>, requested: number): num
   }
   if (!Number.isFinite(first) || last <= first) return requested;
   return Math.min(requested, Math.max(1, Math.round((last - first) / 1000)));
+}
+
+// O mp3 sai sempre; o vídeo só toma o lugar dele quando o servidor pediu isso e
+// o clip cabe no render. Qualquer tropeço aqui devolve o mp3 que já está pronto,
+// com o motivo junto — sumir em silêncio seria pior que não ter vídeo.
+async function preferredVideo(
+  interaction: ChatInputCommandInteraction,
+  clip: PendingClip,
+  limit: number
+): Promise<{ path: string | null; notice?: string }> {
+  const guildId = clip.guildId;
+  if (getSettings(guildId).clipFormat !== 'video') return { path: null };
+  if (!limits(guildId).roomVideo) {
+    return { path: null, notice: '⚠️ Vídeo da sala é do plano Max — mandei o MP3. Veja `/assinatura`.' };
+  }
+  if (clip.seconds > MAX_VIDEO_SECONDS) {
+    return {
+      path: null,
+      notice: `⚠️ A sala em vídeo vai até ${MAX_VIDEO_SECONDS / 60} min e esse clip tem ${clip.label} — mandei o MP3.`,
+    };
+  }
+  if (renderBusy()) {
+    return { path: null, notice: '⚠️ Já tinha um vídeo renderizando — mandei o MP3.' };
+  }
+
+  try {
+    const participants = await resolveParticipants(interaction.guild, clip.userIds);
+    const videoPath = await exportRoomVideo(
+      clip.timeline,
+      participants,
+      clip.audioPath,
+      `${clip.kind}_${guildId}_${clip.id}`,
+      `${clip.kind} • ${clip.label}`
+    );
+    if (fs.statSync(videoPath).size > limit) {
+      try {
+        fs.unlinkSync(videoPath);
+      } catch {
+        /* já removido */
+      }
+      return { path: null, notice: '⚠️ O vídeo passou do limite de anexo do servidor — mandei o MP3.' };
+    }
+    attachVideo(clip.id, videoPath);
+    track(guildId, 'clip', { userId: interaction.user.id, seconds: clip.seconds, detail: 'video' });
+    return { path: videoPath };
+  } catch (err: any) {
+    logger.error(`[CLIP] ${guildId}: vídeo padrão falhou: ${err?.message}`);
+    return { path: null, notice: '⚠️ Não consegui montar a sala em vídeo — mandei o MP3.' };
+  }
 }
 
 export async function publishClip(
@@ -205,25 +255,34 @@ export async function publishClip(
     authorIcon: interaction.user.displayAvatarURL(),
   });
 
+  const video = await preferredVideo(interaction, clip, limit);
+  const current: ClipFormat = video.path ? 'video' : 'mp3';
+  const mainPath = video.path ?? audioPath;
+  const mainSize = video.path ? fs.statSync(video.path).size : audioSize;
+  const avisos = [notice, video.notice].filter(Boolean).join('\n');
+
   const files = [
-    new AttachmentBuilder(audioPath, { name: `${kind}-${label.replace(/\s/g, '')}.mp3` }),
+    new AttachmentBuilder(mainPath, {
+      name: `${kind}-${label.replace(/\s/g, '')}.${video.path ? 'mp4' : 'mp3'}`,
+    }),
   ];
-  const wavePath = await exportWaveform(audioPath);
+  // A onda é o preview do mp3; com o vídeo anexado ela só rouba o embed.
+  const wavePath = video.path ? null : await exportWaveform(audioPath);
   if (wavePath) files.push(new AttachmentBuilder(wavePath, { name: 'waveform.png' }));
 
-  const embed = clipEmbed(clip, interaction.guild, audioSize);
+  const embed = clipEmbed(clip, interaction.guild, mainSize);
   if (wavePath) embed.setImage('attachment://waveform.png');
-  const components = [formatRow(clip.id, 'mp3')];
+  const components = formatRow(clip.id, current, limits(clip.guildId).roomVideo);
 
   try {
     const clipsChannel = resolveClipsChannel(interaction.guild);
     if (clipsChannel && clipsChannel.id !== interaction.channelId) {
-      await clipsChannel.send({ embeds: [embed], files, components });
+      const posted = await clipsChannel.send({ embeds: [embed], files, components });
       await interaction.editReply(
-        `✅ Clip de ${label} postado em <#${clipsChannel.id}>.${notice ? `\n${notice}` : ''}`
+        `✅ Clip de ${label} postado em <#${clipsChannel.id}> — ${posted.url}${avisos ? `\n${avisos}` : ''}`
       );
     } else {
-      await interaction.editReply({ content: notice ?? '', embeds: [embed], files, components });
+      await interaction.editReply({ content: avisos, embeds: [embed], files, components });
     }
   } catch (err: any) {
     logger.error(`[CLIP] ${interaction.guildId}: envio falhou: ${err?.message}`);
@@ -267,7 +326,7 @@ async function sendAudio(interaction: ButtonInteraction, clip: PendingClip): Pro
         name: `${clip.kind}-${clip.label.replace(/\s/g, '')}.mp3`,
       }),
     ],
-    components: [formatRow(clip.id, 'mp3')],
+    components: formatRow(clip.id, 'mp3', limits(clip.guildId).roomVideo),
   });
 }
 
@@ -284,7 +343,7 @@ async function sendVideo(interaction: ButtonInteraction, clip: PendingClip): Pro
           name: `${clip.kind}-${clip.label.replace(/\s/g, '')}.mp4`,
         }),
       ],
-      components: [formatRow(clip.id, 'video')],
+      components: formatRow(clip.id, 'video', true),
     });
     return;
   }
@@ -354,7 +413,7 @@ async function sendVideo(interaction: ButtonInteraction, clip: PendingClip): Pro
           name: `${clip.kind}-${clip.label.replace(/\s/g, '')}.mp4`,
         }),
       ],
-      components: [formatRow(clip.id, 'video')],
+      components: formatRow(clip.id, 'video', true),
     });
   } catch (err: any) {
     logger.error(`[CLIP] ${clip.guildId}: vídeo falhou: ${err?.message}`);

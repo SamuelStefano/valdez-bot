@@ -103,6 +103,7 @@ function addColumn(table: string, column: string, definition: string): void {
 addColumn('guild_settings', 'live_counter', 'INTEGER NOT NULL DEFAULT 0');
 addColumn('guild_settings', 'announce', 'INTEGER NOT NULL DEFAULT 0');
 addColumn('guild_settings', 'highlights', 'INTEGER NOT NULL DEFAULT 0');
+addColumn('guild_settings', 'clip_format', `TEXT NOT NULL DEFAULT 'mp3'`);
 addColumn('licenses', 'owner_id', 'TEXT');
 addColumn('feedback', 'can_publish', 'INTEGER NOT NULL DEFAULT 0');
 
@@ -232,15 +233,16 @@ export const dbStatements: Record<string, Statement> = {
   listGuildSettings: db.prepare(`SELECT * FROM guild_settings`),
 
   upsertGuildSettings: db.prepare(`
-    INSERT INTO guild_settings (guild_id, voice_channel_id, clips_channel_id, auto_join, live_counter, announce, highlights, joined_at)
-    VALUES (@guild_id, @voice_channel_id, @clips_channel_id, @auto_join, @live_counter, @announce, @highlights, @joined_at)
+    INSERT INTO guild_settings (guild_id, voice_channel_id, clips_channel_id, auto_join, live_counter, announce, highlights, clip_format, joined_at)
+    VALUES (@guild_id, @voice_channel_id, @clips_channel_id, @auto_join, @live_counter, @announce, @highlights, @clip_format, @joined_at)
     ON CONFLICT(guild_id) DO UPDATE SET
       voice_channel_id = excluded.voice_channel_id,
       clips_channel_id = excluded.clips_channel_id,
       auto_join = excluded.auto_join,
       live_counter = excluded.live_counter,
       announce = excluded.announce,
-      highlights = excluded.highlights
+      highlights = excluded.highlights,
+      clip_format = excluded.clip_format
   `),
 
   deleteGuildSettings: db.prepare(`DELETE FROM guild_settings WHERE guild_id = ?`),

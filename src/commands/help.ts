@@ -68,7 +68,7 @@ const DOCS: Doc[] = [
       'O bot segura os últimos minutos da call em memória o tempo todo. `/clip` corta essa janela e posta o MP3 no canal.',
       '**duração** — quantos segundos voltar. Sem informar, volta 2 minutos. O teto é o do seu plano.',
       `**pessoa** — isola a voz de um membro só, sem o resto da call por cima. Só no ${cheapestWith('isolatedClip')}.`,
-      `Embaixo do clip aparecem dois botões: **MP3** e **Vídeo da sala**. O vídeo mostra o avatar de cada um acendendo em verde na hora exata em que a pessoa falou — é do ${cheapestWith('roomVideo')}.`,
+      `O MP3 já vem anexado. Embaixo dele o botão **Também em vídeo da sala** monta a versão com o avatar de cada um acendendo em verde na hora exata em que a pessoa falou — é do ${cheapestWith('roomVideo')}, e dá pra deixar o vídeo como padrão em \`/config formato\`.`,
       'Quem deu `/privacidade optout` não entra no clip.',
     ],
   },

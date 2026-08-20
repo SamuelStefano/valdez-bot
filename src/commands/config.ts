@@ -5,7 +5,8 @@ import {
   ChannelType,
   EmbedBuilder,
 } from 'discord.js';
-import { getSettings, saveSettings, optOutCount } from '../modules/guildSettings';
+import { getSettings, saveSettings, optOutCount, ClipFormat } from '../modules/guildSettings';
+import { MAX_VIDEO_SECONDS } from '../utils/videoExporter';
 import { evaluatePresence, leaveChannel, isConnected } from '../modules/voiceManager';
 import { limits, upsell, getLicense, daysLeft, SUPPORT_LABEL } from '../modules/licensing';
 import { stopLiveCounter } from '../modules/liveCounter';
@@ -62,6 +63,21 @@ export const data = new SlashCommandBuilder()
       .setDescription('Avisa no canal de texto quando alguém entra ou sai da call')
       .addBooleanOption((opt) =>
         opt.setName('ligado').setDescription('Postar os avisos').setRequired(true)
+      )
+  )
+  .addSubcommand((sub) =>
+    sub
+      .setName('formato')
+      .setDescription('Escolhe o formato que sai anexado no /clip e /replay')
+      .addStringOption((opt) =>
+        opt
+          .setName('saida')
+          .setDescription('Formato padrão dos clips')
+          .addChoices(
+            { name: 'MP3 (rápido, sempre funciona)', value: 'mp3' },
+            { name: 'Vídeo da sala (plano Max)', value: 'video' }
+          )
+          .setRequired(true)
       )
   )
   .addSubcommand((sub) =>
@@ -283,6 +299,24 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     return;
   }
 
+  if (sub === 'formato') {
+    const saida = interaction.options.getString('saida', true) as ClipFormat;
+    if (saida === 'video' && !limits(guildId).roomVideo) {
+      await interaction.reply({ content: upsell('Vídeo da sala como padrão', 'max'), ephemeral: true });
+      return;
+    }
+    saveSettings({ guildId, clipFormat: saida });
+
+    await interaction.reply({
+      content:
+        saida === 'video'
+          ? `✅ Clips saem em **vídeo da sala** (até ${MAX_VIDEO_SECONDS / 60} min). Acima disso mando o MP3, e o botão continua entregando o MP3 quando quiserem.`
+          : '✅ Clips saem em **MP3**, anexado na hora. Quem quiser o vídeo da sala usa o botão embaixo do clip.',
+      ephemeral: true,
+    });
+    return;
+  }
+
   if (sub === 'momentos') {
     if (!limits(guildId).clipsChannel) {
       await interaction.reply({ content: upsell('Momentos automáticos da call'), ephemeral: true });
@@ -335,6 +369,11 @@ export async function execute(interaction: ChatInputCommandInteraction) {
             ? '🟢 ligados'
             : '⚪ desligados'
           : '🔒 Pro',
+        inline: true,
+      },
+      {
+        name: 'Formato do clip',
+        value: settings.clipFormat === 'video' ? '🎬 vídeo da sala' : '🎧 MP3',
         inline: true,
       },
       { name: 'Na call agora', value: isConnected(guildId) ? 'sim' : 'não', inline: true },

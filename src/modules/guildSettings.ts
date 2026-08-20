@@ -1,6 +1,8 @@
 import { dbStatements } from '../utils/database';
 import { config } from '../config';
 
+export type ClipFormat = 'mp3' | 'video';
+
 export interface GuildSettings {
   guildId: string;
   voiceChannelId: string | null;
@@ -9,6 +11,7 @@ export interface GuildSettings {
   liveCounter: boolean;
   announce: boolean;
   highlights: boolean;
+  clipFormat: ClipFormat;
 }
 
 interface Row {
@@ -19,6 +22,7 @@ interface Row {
   live_counter: number;
   announce: number;
   highlights: number;
+  clip_format: string | null;
 }
 
 // Cache em memória: cada pacote de voz consulta o opt-out e cada tick do
@@ -36,8 +40,19 @@ function toSettings(row: Row): GuildSettings {
     liveCounter: row.live_counter === 1,
     announce: row.announce === 1,
     highlights: row.highlights === 1,
+    clipFormat: row.clip_format === 'video' ? 'video' : 'mp3',
   };
 }
+
+const DEFAULTS: Omit<GuildSettings, 'guildId'> = {
+  voiceChannelId: null,
+  clipsChannelId: null,
+  autoJoin: true,
+  liveCounter: false,
+  announce: false,
+  highlights: false,
+  clipFormat: 'mp3',
+};
 
 export function loadAllSettings(): void {
   cache.clear();
@@ -54,13 +69,10 @@ function seedFromEnv(): void {
   const { seedGuildId, seedVoiceChannelId, seedClipsChannelId } = config;
   if (!seedGuildId || !seedVoiceChannelId || cache.has(seedGuildId)) return;
   saveSettings({
+    ...DEFAULTS,
     guildId: seedGuildId,
     voiceChannelId: seedVoiceChannelId,
     clipsChannelId: seedClipsChannelId,
-    autoJoin: true,
-    liveCounter: false,
-    announce: false,
-    highlights: false,
   });
 }
 
@@ -69,9 +81,7 @@ export function getSettings(guildId: string): GuildSettings {
   if (cached) return cached;
 
   const row = dbStatements.getGuildSettings.get(guildId) as Row | undefined;
-  const settings = row
-    ? toSettings(row)
-    : { guildId, voiceChannelId: null, clipsChannelId: null, autoJoin: true, liveCounter: false, announce: false, highlights: false };
+  const settings = row ? toSettings(row) : { guildId, ...DEFAULTS };
   cache.set(guildId, settings);
   return settings;
 }
@@ -86,6 +96,7 @@ export function saveSettings(patch: Partial<GuildSettings> & { guildId: string }
     live_counter: next.liveCounter ? 1 : 0,
     announce: next.announce ? 1 : 0,
     highlights: next.highlights ? 1 : 0,
+    clip_format: next.clipFormat,
     joined_at: Math.floor(Date.now() / 1000),
   });
   cache.set(next.guildId, next);
