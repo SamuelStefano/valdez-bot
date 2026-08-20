@@ -54,6 +54,11 @@ const WATCHDOG_TICK_MS = 60_000;
 // arrived for this long — the receiver died silently (no Disconnected event).
 // Generous so ordinary quiet stretches don't churn the connection.
 const AUDIO_STALE_MS = 12 * 60_000;
+// Silêncio sozinho não prova nada: quem fica na call sem falar não gera pacote
+// algum, e o watchdog derrubava conexão saudável a cada 12 min — levando o
+// buffer de clip junto. Passado este teto a gente derruba mesmo assim, porque aí
+// já não dá pra descartar um receiver morto.
+const AUDIO_STALE_HARD_MS = 45 * 60_000;
 
 function state(guildId: string): GuildVoice {
   let v = voices.get(guildId);
@@ -124,6 +129,25 @@ function countHumans(client: Client, guildId: string): number {
   const channel = client.guilds.cache.get(guildId)?.channels.cache.get(channelId);
   if (!channel || !channel.isVoiceBased()) return 0;
   return channel.members.filter((m) => !m.user.bot).size;
+}
+
+// Quem está mudo ou surdo não vai gerar áudio, então a ausência dele está
+// explicada e não serve de sintoma pro watchdog.
+function unmutedHumans(client: Client, guildId: string): number {
+  const channelId = getSettings(guildId).voiceChannelId;
+  if (!channelId) return 0;
+  const channel = client.guilds.cache.get(guildId)?.channels.cache.get(channelId);
+  if (!channel || !channel.isVoiceBased()) return 0;
+  return channel.members.filter((m) => !m.user.bot && !m.voice.mute && !m.voice.deaf).size;
+}
+
+// O keepalive UDP continua indo e voltando mesmo com todo mundo calado: é ele,
+// e não o áudio dos outros, que diz se a conexão ainda existe.
+function connectionLooksDead(guildId: string): boolean {
+  const connection = voices.get(guildId)?.connection;
+  if (!connection) return true;
+  if (connection.state.status !== VoiceConnectionStatus.Ready) return true;
+  return connection.ping.udp === undefined;
 }
 
 // Join when there are humans in the channel, leave when it empties.
@@ -213,14 +237,19 @@ export function startVoiceWatchdog(client: Client): void {
       const last = getLastActivityAt(guildId);
       if (last === 0) continue; // buffering not yet (re)started — nothing to judge
       const idleMs = Date.now() - last;
-      if (idleMs > AUDIO_STALE_MS) {
-        logger.warn(
-          `[VOICE] ${guildId}: watchdog — no audio for ${Math.round(idleMs / 1000)}s with ${humans} present, forcing rejoin`
-        );
-        void leaveChannel(client, guildId)
-          .then(() => joinChannel(client, guildId))
-          .catch((err: any) => logger.error(`[VOICE] ${guildId}: rejoin falhou: ${err?.message}`));
-      }
+      if (idleMs <= AUDIO_STALE_MS) continue;
+      if (unmutedHumans(client, guildId) === 0) continue;
+
+      const dead = connectionLooksDead(guildId);
+      if (!dead && idleMs <= AUDIO_STALE_HARD_MS) continue;
+
+      logger.warn(
+        `[VOICE] ${guildId}: watchdog — no audio for ${Math.round(idleMs / 1000)}s with ${humans} present ` +
+          `(${dead ? 'conexão morta' : 'conexão viva, teto de silêncio estourado'}), forcing rejoin`
+      );
+      void leaveChannel(client, guildId)
+        .then(() => joinChannel(client, guildId))
+        .catch((err: any) => logger.error(`[VOICE] ${guildId}: rejoin falhou: ${err?.message}`));
     }
   }, WATCHDOG_TICK_MS);
 }
