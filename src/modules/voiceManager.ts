@@ -141,13 +141,14 @@ function unmutedHumans(client: Client, guildId: string): number {
   return channel.members.filter((m) => !m.user.bot && !m.voice.mute && !m.voice.deaf).size;
 }
 
-// O keepalive UDP continua indo e voltando mesmo com todo mundo calado: é ele,
-// e não o áudio dos outros, que diz se a conexão ainda existe.
+// O heartbeat do WebSocket de voz continua indo e voltando mesmo com todo mundo
+// calado: é ele, e não o áudio dos outros, que diz se a conexão ainda existe.
+// (`ping.udp` não serve — o @discordjs/voice parou de atualizar esse campo.)
 function connectionLooksDead(guildId: string): boolean {
   const connection = voices.get(guildId)?.connection;
   if (!connection) return true;
   if (connection.state.status !== VoiceConnectionStatus.Ready) return true;
-  return connection.ping.udp === undefined;
+  return connection.ping.ws === undefined;
 }
 
 // Join when there are humans in the channel, leave when it empties.
