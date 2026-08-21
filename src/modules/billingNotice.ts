@@ -1,6 +1,6 @@
 import { Client, EmbedBuilder } from 'discord.js';
 import { getLicense, PLANS, founderSlotsLeft } from './licensing';
-import { resolveNoticeChannel } from './noticeChannel';
+import { resolveBillingChannel } from './noticeChannel';
 import { track } from './telemetry';
 import { checkoutUrl, config } from '../config';
 import { logger } from '../utils/logger';
@@ -17,7 +17,7 @@ export async function announceExpired(client: Client, guildId: string): Promise<
   track(guildId, 'license_expired', { detail: license.plan });
 
   const guild = client.guilds.cache.get(guildId);
-  const channel = guild ? resolveNoticeChannel(guild) : null;
+  const channel = guild ? resolveBillingChannel(guild) : null;
   if (!channel) return;
 
   const slots = founderSlotsLeft();

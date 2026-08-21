@@ -2,6 +2,7 @@ import { Client, EmbedBuilder, Guild } from 'discord.js';
 import { dbStatements } from '../utils/database';
 import { limits, isActive } from './licensing';
 import { resolveNoticeChannel } from './noticeChannel';
+import { getSettings } from './guildSettings';
 import { listActiveSessions, formatDuration } from './voiceTracker';
 import { pickAwards, Participant } from './callAwards';
 import { track } from './telemetry';
@@ -111,6 +112,7 @@ export function endCall(client: Client, guildId: string): void {
   const call = calls.get(guildId);
   calls.delete(guildId);
   if (!call) return;
+  if (!getSettings(guildId).recap) return;
   if (!limits(guildId).stats || !isActive(guildId)) return;
 
   const guild = client.guilds.cache.get(guildId);

@@ -2,6 +2,7 @@ import { Client, EmbedBuilder, Guild } from 'discord.js';
 import { dbStatements } from '../utils/database';
 import { limits, isActive } from './licensing';
 import { resolveNoticeChannel } from './noticeChannel';
+import { getSettings } from './guildSettings';
 import { formatDuration } from './voiceTracker';
 import { track } from './telemetry';
 import { logger } from '../utils/logger';
@@ -93,6 +94,7 @@ async function tick(client: Client): Promise<void> {
     // O try cobre a checagem também: uma exceção fora dele abortava a segunda
     // inteira, e todos os servidores da fila ficavam sem retrospectiva.
     try {
+      if (!getSettings(guild.id).weeklyRecap) continue;
       if (!limits(guild.id).weeklyRecap || !isActive(guild.id)) continue;
       // O marcador é um evento no banco, não memória: restart de container numa
       // segunda à tarde repostaria a retrospectiva em todos os servidores.

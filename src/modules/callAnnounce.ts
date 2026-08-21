@@ -1,5 +1,6 @@
 import { Client, TextChannel, VoiceState } from 'discord.js';
 import { getSettings } from './guildSettings';
+import { resolveNoticeChannel } from './noticeChannel';
 import { limits, isActive } from './licensing';
 import { formatDuration } from './voiceTracker';
 import { logger } from '../utils/logger';
@@ -33,10 +34,7 @@ function recentlyAnnounced(key: string): boolean {
 function resolveTextChannel(client: Client, guildId: string): TextChannel | null {
   const guild = client.guilds.cache.get(guildId);
   if (!guild) return null;
-  const clipsChannelId = getSettings(guildId).clipsChannelId;
-  const clips = clipsChannelId ? guild.channels.cache.get(clipsChannelId) : null;
-  if (clips?.isTextBased()) return clips as TextChannel;
-  return guild.systemChannel ?? null;
+  return resolveNoticeChannel(guild);
 }
 
 function humansIn(client: Client, guildId: string, voiceChannelId: string): number {

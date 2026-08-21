@@ -7,10 +7,13 @@ export interface GuildSettings {
   guildId: string;
   voiceChannelId: string | null;
   clipsChannelId: string | null;
+  noticesChannelId: string | null;
   autoJoin: boolean;
   liveCounter: boolean;
   announce: boolean;
   highlights: boolean;
+  recap: boolean;
+  weeklyRecap: boolean;
   clipFormat: ClipFormat;
 }
 
@@ -18,10 +21,13 @@ interface Row {
   guild_id: string;
   voice_channel_id: string | null;
   clips_channel_id: string | null;
+  notices_channel_id: string | null;
   auto_join: number;
   live_counter: number;
   announce: number;
   highlights: number;
+  recap: number;
+  weekly_recap: number;
   clip_format: string | null;
 }
 
@@ -36,21 +42,30 @@ function toSettings(row: Row): GuildSettings {
     guildId: row.guild_id,
     voiceChannelId: row.voice_channel_id,
     clipsChannelId: row.clips_channel_id,
+    noticesChannelId: row.notices_channel_id,
     autoJoin: row.auto_join === 1,
     liveCounter: row.live_counter === 1,
     announce: row.announce === 1,
     highlights: row.highlights === 1,
+    recap: row.recap === 1,
+    weeklyRecap: row.weekly_recap === 1,
     clipFormat: row.clip_format === 'video' ? 'video' : 'mp3',
   };
 }
 
+// Bot que fala sem ser chamado é bot que o admin silencia ou remove. Todo aviso
+// nasce desligado e só liga por `/config`; o único jeito de aparecer sozinho é
+// alguém ter pedido.
 const DEFAULTS: Omit<GuildSettings, 'guildId'> = {
   voiceChannelId: null,
   clipsChannelId: null,
+  noticesChannelId: null,
   autoJoin: true,
   liveCounter: false,
   announce: false,
   highlights: false,
+  recap: false,
+  weeklyRecap: false,
   clipFormat: 'mp3',
 };
 
@@ -92,10 +107,13 @@ export function saveSettings(patch: Partial<GuildSettings> & { guildId: string }
     guild_id: next.guildId,
     voice_channel_id: next.voiceChannelId,
     clips_channel_id: next.clipsChannelId,
+    notices_channel_id: next.noticesChannelId,
     auto_join: next.autoJoin ? 1 : 0,
     live_counter: next.liveCounter ? 1 : 0,
     announce: next.announce ? 1 : 0,
     highlights: next.highlights ? 1 : 0,
+    recap: next.recap ? 1 : 0,
+    weekly_recap: next.weeklyRecap ? 1 : 0,
     clip_format: next.clipFormat,
     joined_at: Math.floor(Date.now() / 1000),
   });

@@ -51,6 +51,17 @@ export const data = new SlashCommandBuilder()
   )
   .addSubcommand((sub) =>
     sub
+      .setName('canal-avisos')
+      .setDescription('Define onde o bot posta avisos, resumos e retrospectivas')
+      .addChannelOption((opt) =>
+        opt
+          .setName('texto')
+          .setDescription('Canal de texto (vazio limpa e cala o bot)')
+          .addChannelTypes(ChannelType.GuildText)
+      )
+  )
+  .addSubcommand((sub) =>
+    sub
       .setName('contador')
       .setDescription('Liga ou desliga o contador de horas ao vivo na call')
       .addBooleanOption((opt) =>
@@ -63,6 +74,22 @@ export const data = new SlashCommandBuilder()
       .setDescription('Avisa no canal de texto quando alguém entra ou sai da call')
       .addBooleanOption((opt) =>
         opt.setName('ligado').setDescription('Postar os avisos').setRequired(true)
+      )
+  )
+  .addSubcommand((sub) =>
+    sub
+      .setName('resumo')
+      .setDescription('Posta um card com quem ficou na call quando ela acaba')
+      .addBooleanOption((opt) =>
+        opt.setName('ligado').setDescription('Postar o resumo da call').setRequired(true)
+      )
+  )
+  .addSubcommand((sub) =>
+    sub
+      .setName('retrospectiva')
+      .setDescription('Posta a retrospectiva da semana toda segunda ao meio-dia')
+      .addBooleanOption((opt) =>
+        opt.setName('ligado').setDescription('Postar a retrospectiva semanal').setRequired(true)
       )
   )
   .addSubcommand((sub) =>
@@ -132,6 +159,14 @@ function missingPermissions(interaction: ChatInputCommandInteraction): string[] 
   const me = interaction.guild?.members.me;
   if (!me) return [];
   return REQUIRED_PERMISSIONS.filter(([flag]) => !me.permissions.has(flag)).map(([, name]) => name);
+}
+
+const NO_CHANNEL =
+  '⚠️ Defina antes onde eu posto: `/config canal-avisos`. Sem canal eu não falo em lugar nenhum.';
+
+function noticeTarget(guildId: string): string | null {
+  const settings = getSettings(guildId);
+  return settings.noticesChannelId ?? settings.clipsChannelId;
 }
 
 function rewardsList(guildId: string): string {
@@ -264,6 +299,41 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     return;
   }
 
+  if (sub === 'canal-avisos') {
+    const channel = interaction.options.getChannel('texto');
+    saveSettings({ guildId, noticesChannelId: channel?.id ?? null });
+    await interaction.reply({
+      content: channel
+        ? `✅ Avisos, resumos e retrospectivas vão para <#${channel.id}>.`
+        : '⚪ Canal de avisos limpo. Sem canal definido eu uso o de clips — e se não tiver nenhum, fico calado.',
+      ephemeral: true,
+    });
+    return;
+  }
+
+  if (sub === 'resumo' || sub === 'retrospectiva') {
+    if (!limits(guildId).stats) {
+      await interaction.reply({ content: upsell('Resumos de call'), ephemeral: true });
+      return;
+    }
+    const ligado = interaction.options.getBoolean('ligado', true);
+    if (ligado && !noticeTarget(guildId)) {
+      await interaction.reply({ content: NO_CHANNEL, ephemeral: true });
+      return;
+    }
+    saveSettings(sub === 'resumo' ? { guildId, recap: ligado } : { guildId, weeklyRecap: ligado });
+
+    const on =
+      sub === 'resumo'
+        ? '✅ Resumo ligado. Quando a call acabar eu posto quem estava, quanto tempo e os prêmios.'
+        : '✅ Retrospectiva ligada. Toda segunda ao meio-dia eu posto o resumo da semana.';
+    await interaction.reply({
+      content: ligado ? on : '⚪ Desligado.',
+      ephemeral: true,
+    });
+    return;
+  }
+
   if (sub === 'contador') {
     if (!limits(guildId).stats) {
       await interaction.reply({ content: upsell('Contador de horas ao vivo'), ephemeral: true });
@@ -288,6 +358,10 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       return;
     }
     const ligado = interaction.options.getBoolean('ligado', true);
+    if (ligado && !noticeTarget(guildId)) {
+      await interaction.reply({ content: NO_CHANNEL, ephemeral: true });
+      return;
+    }
     saveSettings({ guildId, announce: ligado });
 
     await interaction.reply({
@@ -359,9 +433,23 @@ export async function execute(interaction: ChatInputCommandInteraction) {
         name: 'Canal de clips',
         value: settings.clipsChannelId ? `<#${settings.clipsChannelId}>` : 'responde no próprio canal do comando',
       },
+      {
+        name: 'Canal de avisos',
+        value: settings.noticesChannelId
+          ? `<#${settings.noticesChannelId}>`
+          : settings.clipsChannelId
+            ? `<#${settings.clipsChannelId}> (o de clips)`
+            : '⚪ nenhum — `/config canal-avisos`',
+      },
       { name: 'Presença automática', value: settings.autoJoin ? '🟢 ativa' : '⚪ desativada', inline: true },
       { name: 'Contador na call', value: settings.liveCounter ? '🟢 ligado' : '⚪ desligado', inline: true },
-      { name: 'Avisos de call', value: settings.announce ? '🟢 ligados' : '⚪ desligados', inline: true },
+      { name: 'Entrou/saiu da call', value: settings.announce ? '🟢 ligados' : '⚪ desligados', inline: true },
+      { name: 'Resumo da call', value: settings.recap ? '🟢 ligado' : '⚪ desligado', inline: true },
+      {
+        name: 'Retrospectiva semanal',
+        value: plan.weeklyRecap ? (settings.weeklyRecap ? '🟢 ligada' : '⚪ desligada') : '🔒 Pro',
+        inline: true,
+      },
       {
         name: 'Momentos automáticos',
         value: plan.clipsChannel

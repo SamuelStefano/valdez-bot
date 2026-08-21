@@ -1,5 +1,6 @@
-import { Client, EmbedBuilder, Guild, Message, PermissionFlagsBits, TextChannel } from 'discord.js';
+import { Client, EmbedBuilder, Message, TextChannel } from 'discord.js';
 import { getSettings } from './guildSettings';
+import { resolveNoticeChannel } from './noticeChannel';
 import { limits, isActive } from './licensing';
 import { listActiveSessions, formatDuration } from './voiceTracker';
 import { getActiveRecordings } from './replayBuffer';
@@ -21,24 +22,7 @@ function resolveTextChannel(client: Client, guildId: string): TextChannel | null
   const guild = client.guilds.cache.get(guildId);
   if (!guild) return null;
 
-  const clipsChannelId = getSettings(guildId).clipsChannelId;
-  const clips = clipsChannelId ? guild.channels.cache.get(clipsChannelId) : null;
-  if (clips?.isTextBased() && writable(guild.members.me, clips as TextChannel)) return clips as TextChannel;
-
-  const system = guild.systemChannel;
-  return system && writable(guild.members.me, system) ? system : null;
-}
-
-// O canal de sistema costuma ser fechado pro bot: sem checar, toda call abria com
-// um 403 no log e nenhum contador na tela.
-function writable(me: Guild['members']['me'], channel: TextChannel): boolean {
-  if (!me) return false;
-  const perms = channel.permissionsFor(me);
-  return (
-    !!perms?.has(PermissionFlagsBits.ViewChannel) &&
-    perms.has(PermissionFlagsBits.SendMessages) &&
-    perms.has(PermissionFlagsBits.EmbedLinks)
-  );
+  return resolveNoticeChannel(guild);
 }
 
 function render(client: Client, guildId: string, counter: Counter, closed: boolean): EmbedBuilder {
