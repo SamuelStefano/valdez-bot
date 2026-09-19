@@ -61,26 +61,36 @@ export function resetHighlights(guildId: string): void {
   if (!s) return;
   s.recent = [];
   s.firedThisCall = 0;
+  // Sem isto, uma captura que morreu no meio deixava o guild travado em
+  // `capturing` e o detector nunca mais disparava, nem numa call nova.
+  s.capturing = false;
 }
 
 export function dropGuildHighlights(guildId: string): void {
   states.delete(guildId);
 }
 
+// Ponto único de destravamento: qualquer coisa que estoure entre o export e o
+// send (storeClip, timeline, premiumTier) deixava `capturing` preso em true e o
+// "Momento da call" parava de existir naquele servidor até reiniciar o processo.
 async function capture(client: Client, guildId: string): Promise<void> {
+  const s = state(guildId);
+  try {
+    await runCapture(client, guildId);
+  } catch (err: any) {
+    logger.error(`[MOMENTO] ${guildId}: captura falhou: ${err?.message}`);
+  } finally {
+    s.capturing = false;
+  }
+}
+
+async function runCapture(client: Client, guildId: string): Promise<void> {
   const guild = client.guilds.cache.get(guildId);
   const channel = guild ? clipsChannel(guild) : null;
-  const s = state(guildId);
-  if (!guild || !channel) {
-    s.capturing = false;
-    return;
-  }
+  if (!guild || !channel) return;
 
   const packets = getBufferSnapshot(guildId, CLIP_SECONDS);
-  if (packets.size < MIN_SPEAKERS) {
-    s.capturing = false;
-    return;
-  }
+  if (packets.size < MIN_SPEAKERS) return;
 
   const limitBytes = maxUploadBytes(Number(guild.premiumTier ?? 0));
   let audioPath: string;
@@ -88,7 +98,6 @@ async function capture(client: Client, guildId: string): Promise<void> {
     audioPath = await exportClip(packets, `momento_${guildId}_${Date.now()}`, CLIP_SECONDS, limitBytes);
   } catch (err: any) {
     logger.error(`[MOMENTO] ${guildId}: export falhou: ${err?.message}`);
-    s.capturing = false;
     return;
   }
 
@@ -130,8 +139,6 @@ async function capture(client: Client, guildId: string): Promise<void> {
     } catch {
       /* já removido */
     }
-  } finally {
-    s.capturing = false;
   }
 }
 
