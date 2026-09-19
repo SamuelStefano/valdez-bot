@@ -3,6 +3,7 @@ import { dbStatements } from '../utils/database';
 import { getSettings } from './guildSettings';
 import { saveLicense, getLicense, priceCents, Plan, LicenseStatus, PLANS } from './licensing';
 import { clearExpiredNotice } from './billingNotice';
+import { buildExpireLicensesRequest } from './licenseExpiry';
 import { isConnected, listConnections, evaluatePresence } from './voiceManager';
 import { isBuffering } from './replayBuffer';
 import { config } from '../config';
@@ -11,6 +12,7 @@ import { logger } from '../utils/logger';
 const BATCH = 200;
 const INTERVAL_MS = 60_000;
 const RETENTION_DAYS = 30;
+const LICENSE_PULL_LIMIT = 1000;
 const HEARTBEAT_RETENTION_DAYS = 7;
 
 let lastPruneAt = 0;
@@ -101,7 +103,16 @@ async function pushGuilds(client: Client): Promise<void> {
   // ignore-duplicates: quem manda na licença é o webhook de pagamento, que grava
   // direto no Supabase. Com merge, uma renovação era desfeita no tick seguinte —
   // o bot subia a linha local ainda vencida por cima do pagamento aprovado.
+  // A mudança de status que interessa (vencimento) sobe em expireRemoteLicenses,
+  // que filtra pelo expires_at do próprio banco e por isso não tem essa corrida.
   await upsert('licenses', licenses, 'guild_id', 'ignore-duplicates');
+}
+
+// O Supabase não tem job de expiração: sem isto a licença vencida segue `active`
+// lá e o painel conta como receita quem já parou de pagar.
+async function expireRemoteLicenses(): Promise<void> {
+  const { path, method, body } = buildExpireLicensesRequest(new Date());
+  await request(path, { method, headers: headers({ Prefer: 'return=minimal' }), body });
 }
 
 async function pushEvents(): Promise<void> {
@@ -158,11 +169,16 @@ async function pushHeartbeat(client: Client): Promise<void> {
 // Pagamento entra pelo painel, não pelo bot: o Supabase é a fonte da verdade do
 // que foi pago e o SQLite local só espelha.
 async function pullLicenses(client: Client): Promise<void> {
-  const res = await request('licenses?select=guild_id,plan,status,founder,started_at,expires_at', {
-    method: 'GET',
-    headers: headers(),
-  });
+  // Sem limite explícito o PostgREST corta a resposta no teto dele sem erro, e a
+  // licença que não veio é um cliente pagante que perde o plano no tick seguinte.
+  const res = await request(
+    `licenses?select=guild_id,plan,status,founder,started_at,expires_at&limit=${LICENSE_PULL_LIMIT}`,
+    { method: 'GET', headers: headers() }
+  );
   const remote = (await res.json()) as any[];
+  if (remote.length >= LICENSE_PULL_LIMIT) {
+    logger.warn(`[SYNC] pullLicenses bateu o teto de ${LICENSE_PULL_LIMIT} linhas — pagina isto`);
+  }
 
   for (const row of remote) {
     if (!client.guilds.cache.has(row.guild_id)) continue;
@@ -222,6 +238,8 @@ async function step(name: string, fn: () => Promise<void>): Promise<void> {
 }
 
 async function runOnce(client: Client): Promise<void> {
+  // Expira antes de puxar: o pull já desce o status corrigido pro SQLite.
+  await step('expireRemoteLicenses', expireRemoteLicenses);
   // A licença desce primeiro: o resto da rodada já enxerga o plano pago.
   await step('pullLicenses', () => pullLicenses(client));
   await step('pushGuilds', () => pushGuilds(client));
