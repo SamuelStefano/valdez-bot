@@ -41,6 +41,10 @@ interface GuildQueue {
 const queues = new Map<string, GuildQueue>();
 const HISTORY_MAX = 25;
 
+// Full scale clips in a voice call, so every guild starts well below it.
+export const DEFAULT_VOLUME = 20;
+export const VOLUME_STEP = 10;
+
 export type PlayerUpdateEvent =
   | 'trackStart'
   | 'trackEnd'
@@ -145,7 +149,7 @@ function getOrCreateQueue(guildId: string): GuildQueue {
       current: null,
       player,
       loop: false,
-      volume: 100,
+      volume: DEFAULT_VOLUME,
       resource: null,
       recovering: false,
       manualStop: false,
@@ -380,7 +384,8 @@ async function playNext(guildId: string) {
 
   try {
     const stream = ytStream(track.url);
-    const resource = createAudioResource(stream, { inputType: StreamType.Arbitrary });
+    const resource = createAudioResource(stream, { inputType: StreamType.Arbitrary, inlineVolume: true });
+    resource.volume?.setVolume(queue.volume / 100);
     queue.resource = resource;
 
     unmute(guildId);
@@ -479,19 +484,33 @@ export function toggleLoop(guildId: string): boolean {
   return queue.loop;
 }
 
+export function setVolume(guildId: string, percent: number): number {
+  const queue = getOrCreateQueue(guildId);
+  queue.volume = Math.min(100, Math.max(0, Math.round(percent)));
+  queue.resource?.volume?.setVolume(queue.volume / 100);
+  emit(guildId, 'queueChanged');
+  return queue.volume;
+}
+
+export function getVolume(guildId: string): number {
+  return queues.get(guildId)?.volume ?? DEFAULT_VOLUME;
+}
+
 export function getQueue(guildId: string): {
   current: Track | null;
   tracks: Track[];
   history: Track[];
   loop: boolean;
+  volume: number;
 } {
   const queue = queues.get(guildId);
-  if (!queue) return { current: null, tracks: [], history: [], loop: false };
+  if (!queue) return { current: null, tracks: [], history: [], loop: false, volume: DEFAULT_VOLUME };
   return {
     current: queue.current,
     tracks: [...queue.tracks],
     history: [...queue.history],
     loop: queue.loop,
+    volume: queue.volume,
   };
 }
 
