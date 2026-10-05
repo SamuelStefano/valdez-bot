@@ -1,5 +1,5 @@
 import { ChatInputCommandInteraction, SlashCommandBuilder, EmbedBuilder } from 'discord.js';
-import { skip, stop, pause, resume, toggleLoop, getQueue, nowPlaying, previous } from '../modules/musicPlayer';
+import { skip, stop, pause, resume, toggleLoop, getQueue, nowPlaying, previous, setVolume, getVolume } from '../modules/musicPlayer';
 import { limits, upsell } from '../modules/licensing';
 
 export const data = new SlashCommandBuilder()
@@ -11,6 +11,14 @@ export const data = new SlashCommandBuilder()
   .addSubcommand(sub => sub.setName('pause').setDescription('Pausa a música'))
   .addSubcommand(sub => sub.setName('resume').setDescription('Retoma a música'))
   .addSubcommand(sub => sub.setName('loop').setDescription('Ativa/desativa loop'))
+  .addSubcommand(sub =>
+    sub
+      .setName('volume')
+      .setDescription('Mostra ou ajusta o volume da música (0 a 100)')
+      .addIntegerOption(opt =>
+        opt.setName('nivel').setDescription('Volume de 0 a 100').setMinValue(0).setMaxValue(100),
+      ),
+  )
   .addSubcommand(sub => sub.setName('queue').setDescription('Mostra a fila de músicas'))
   .addSubcommand(sub => sub.setName('np').setDescription('Mostra a música atual'));
 
@@ -65,6 +73,16 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     case 'loop': {
       const looping = toggleLoop(guildId);
       await interaction.reply(looping ? '🔁 Loop **ativado**.' : '➡️ Loop **desativado**.');
+      break;
+    }
+
+    case 'volume': {
+      const level = interaction.options.getInteger('nivel');
+      if (level === null) {
+        await interaction.reply(`🔊 Volume em **${getVolume(guildId)}%**.`);
+      } else {
+        await interaction.reply(`🔊 Volume ajustado para **${setVolume(guildId, level)}%**.`);
+      }
       break;
     }
 

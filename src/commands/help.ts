@@ -111,12 +111,13 @@ const DOCS: Doc[] = [
   },
   {
     name: '/music',
-    usage: '/music skip · previous · pause · resume · stop · loop · queue · np',
+    usage: '/music skip · previous · pause · resume · stop · loop · volume · queue · np',
     category: 'musica',
     summary: 'Controla o que está tocando',
     detail: [
       '**skip** pula, **previous** volta pra anterior, **pause** e **resume** param e retomam, **stop** encerra e limpa a fila.',
       '**loop** repete, **queue** mostra a fila inteira e **np** mostra só o que está tocando agora.',
+      '**volume** ajusta de 0 a 100. A música entra em 20% pra não estourar; os botões 🔉 e 🔊 mudam de 10 em 10.',
       'Os mesmos controles ficam em botões embaixo da mensagem da música, pra ninguém precisar digitar no meio da call.',
     ],
     gate: 'music',

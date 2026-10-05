@@ -13,14 +13,17 @@ import {
 import { logger } from '../utils/logger';
 import {
   getQueue,
+  getVolume,
   isPaused,
   pause,
   previous,
   resume,
   setOnPlayerUpdate,
+  setVolume,
   skip,
   stop,
   toggleLoop,
+  VOLUME_STEP,
 } from './musicPlayer';
 
 const BTN = {
@@ -29,6 +32,8 @@ const BTN = {
   skip: 'music:skip',
   stop: 'music:stop',
   loop: 'music:loop',
+  volumeDown: 'music:volumeDown',
+  volumeUp: 'music:volumeUp',
 };
 
 // guildId → cached modal message
@@ -125,6 +130,7 @@ function buildEmbed(guildId: string): EmbedBuilder {
       { name: 'Duração', value: q.current.duration, inline: true },
       { name: 'Pedido por', value: q.current.requestedBy, inline: true },
       { name: 'Loop', value: q.loop ? '🔁 ativado' : '➡️ desativado', inline: true },
+      { name: 'Volume', value: `🔊 ${q.volume}%`, inline: true },
       { name: 'Próximas', value: upNext + moreCount },
     )
     .setFooter({ text: `Fila: ${q.tracks.length} música(s) • Histórico: ${q.history.length}` });
@@ -165,7 +171,19 @@ function buildButtons(guildId: string) {
       .setStyle(q.loop ? ButtonStyle.Success : ButtonStyle.Secondary)
       .setDisabled(noCurrent),
   );
-  return [row];
+  const volumeRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId(BTN.volumeDown)
+      .setEmoji('🔉')
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(q.volume <= 0),
+    new ButtonBuilder()
+      .setCustomId(BTN.volumeUp)
+      .setEmoji('🔊')
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(q.volume >= 100),
+  );
+  return [row, volumeRow];
 }
 
 export async function updateModal(guildId: string) {
@@ -245,6 +263,14 @@ export async function handleMusicButton(interaction: ButtonInteraction) {
     }
     case BTN.loop: {
       toggleLoop(guildId);
+      break;
+    }
+    case BTN.volumeDown: {
+      setVolume(guildId, getVolume(guildId) - VOLUME_STEP);
+      break;
+    }
+    case BTN.volumeUp: {
+      setVolume(guildId, getVolume(guildId) + VOLUME_STEP);
       break;
     }
   }
