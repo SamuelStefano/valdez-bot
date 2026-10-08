@@ -123,11 +123,17 @@ export async function leaveChannel(client: Client, guildId: string): Promise<voi
   logger.info(`[VOICE] ${guildId}: left channel`);
 }
 
-function countHumans(client: Client, guildId: string): number {
+// null é "não sei", e não é a mesma coisa que zero: cache de canal ainda não
+// populado virava "canal vazio" e derrubava o bot no meio de uma call de
+// verdade, com card de "acabou a call" e buffer perdido junto.
+function countHumans(client: Client, guildId: string): number | null {
   const channelId = getSettings(guildId).voiceChannelId;
   if (!channelId) return 0;
-  const channel = client.guilds.cache.get(guildId)?.channels.cache.get(channelId);
-  if (!channel || !channel.isVoiceBased()) return 0;
+  const guild = client.guilds.cache.get(guildId);
+  if (!guild) return null;
+  const channel = guild.channels.cache.get(channelId);
+  if (!channel) return null;
+  if (!channel.isVoiceBased()) return 0;
   return channel.members.filter((m) => !m.user.bot).size;
 }
 
@@ -162,6 +168,7 @@ export function evaluatePresence(client: Client, guildId: string): void {
   if (!isActive(guildId)) void announceExpired(client, guildId);
 
   const humans = countHumans(client, guildId);
+  if (humans === null) return;
   if (humans > 0 && !isConnected(guildId)) {
     joinChannel(client, guildId);
   } else if (humans === 0 && isConnected(guildId)) {
@@ -219,6 +226,7 @@ export function startVoiceWatchdog(client: Client): void {
       if (!isConfigured(guildId) || !isPresenceEnabled(guildId)) continue;
 
       const humans = countHumans(client, guildId);
+      if (humans === null) continue;
       if (humans === 0) {
         if (isConnected(guildId)) {
           logger.info(`[VOICE] ${guildId}: watchdog — channel empty, leaving`);
