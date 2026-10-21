@@ -160,9 +160,9 @@ const DOCS: Doc[] = [
     category: 'servidor',
     summary: 'Limpa o canal de texto',
     detail: [
-      'Apaga de uma vez as últimas mensagens do canal, até 100 por comando.',
+      'Apaga as últimas mensagens do canal, até 500 por comando — de qualquer data.',
       'Só aparece pra quem tem permissão de **Gerenciar Mensagens**.',
-      'O Discord não deixa apagar em lote mensagem com mais de 14 dias — quando isso acontece, eu digo quantas ficaram.',
+      'As recentes somem na hora. As com mais de 14 dias o Discord só deixa apagar uma a uma, então essas levam cerca de 1 min a cada 60.',
     ],
   },
   {

@@ -2,13 +2,18 @@ import {
   ChatInputCommandInteraction,
   SlashCommandBuilder,
   PermissionFlagsBits,
+  Message,
   TextChannel,
 } from 'discord.js';
 import { track } from '../modules/telemetry';
+import { splitByAge } from './clearPlan';
 
-// O bulkDelete do Discord só aceita 100 por chamada e recusa mensagem com mais
-// de 14 dias — os dois limites são da API, não escolha nossa.
-const MAX_MESSAGES = 100;
+// Discord's bulkDelete takes 100 per call and refuses anything past 14 days, so
+// older messages are deleted one by one. That path is rate-limited to roughly
+// one per second, which is what caps the total.
+const MAX_MESSAGES = 500;
+const PAGE_SIZE = 100;
+const PROGRESS_EVERY = 25;
 
 export const data = new SlashCommandBuilder()
   .setName('clear')
@@ -59,27 +64,73 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
   const requested = interaction.options.getInteger('quantidade', true);
 
-  try {
-    const deleted = await (channel as TextChannel).bulkDelete(requested, true);
-    track(guildId, 'clear', { userId: interaction.user.id, detail: String(deleted.size) });
+  const textChannel = channel as TextChannel;
+  let deletedCount = 0;
+  let failedCount = 0;
 
-    if (deleted.size === 0) {
+  try {
+    const targets: Message[] = [];
+    let before: string | undefined;
+    while (targets.length < requested) {
+      const page = await textChannel.messages.fetch({
+        limit: Math.min(PAGE_SIZE, requested - targets.length),
+        before,
+      });
+      if (page.size === 0) break;
+      targets.push(...page.values());
+      before = page.last()?.id;
+    }
+
+    const { recent, old } = splitByAge(targets, Date.now());
+
+    for (let i = 0; i < recent.length; i += PAGE_SIZE) {
+      const batch = recent.slice(i, i + PAGE_SIZE);
+      if (batch.length === 1) {
+        await batch[0].delete();
+        deletedCount += 1;
+      } else {
+        const deleted = await textChannel.bulkDelete(batch, true);
+        deletedCount += deleted.size;
+      }
+    }
+
+    if (old.length > 0) {
       await interaction.editReply(
-        '⚠️ Nada apagado — o Discord não deixa apagar mensagens com mais de 14 dias.'
+        `🧹 Apaguei **${deletedCount}**. Agora vou uma a uma nas **${old.length}** com mais de 14 dias — demora uns ${Math.ceil(old.length / 60)} min.`
       );
+    }
+
+    for (const [index, message] of old.entries()) {
+      try {
+        await message.delete();
+        deletedCount += 1;
+      } catch {
+        failedCount += 1;
+      }
+      if ((index + 1) % PROGRESS_EVERY === 0 && index + 1 < old.length) {
+        await interaction
+          .editReply(`🧹 Apagando as antigas… **${index + 1}/${old.length}**`)
+          .catch(() => {});
+      }
+    }
+
+    track(guildId, 'clear', { userId: interaction.user.id, detail: String(deletedCount) });
+
+    if (deletedCount === 0) {
+      await interaction.editReply('⚠️ Nada apagado — o canal não tem mensagens.');
       return;
     }
 
-    // Faltar mensagem quase sempre é canal com menos histórico que o pedido; a
-    // regra dos 14 dias é a exceção, e culpá-la sempre era informação falsa.
-    const sobra =
-      deleted.size < requested
-        ? '\n*O canal não tinha mais que isso, ou as demais passam de 14 dias.*'
-        : '';
+    const sobra = targets.length < requested ? '\n*O canal não tinha mais que isso.*' : '';
+    const falhas = failedCount > 0 ? `\n*${failedCount} não puderam ser apagadas.*` : '';
     await interaction.editReply(
-      `🧹 Apaguei **${deleted.size}** ${deleted.size === 1 ? 'mensagem' : 'mensagens'}.${sobra}`
+      `🧹 Apaguei **${deletedCount}** ${deletedCount === 1 ? 'mensagem' : 'mensagens'}.${sobra}${falhas}`
     );
   } catch (err: any) {
-    await interaction.editReply(`❌ Não consegui apagar: ${err?.message ?? 'erro desconhecido'}`);
+    await interaction
+      .editReply(
+        `❌ Parei depois de apagar ${deletedCount}: ${err?.message ?? 'erro desconhecido'}`
+      )
+      .catch(() => {});
   }
 }
